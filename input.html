@@ -445,7 +445,8 @@ function savePivot() {
   });
   saveFinanceRecords(records);
   renderHistTable();
-  toast('Saved successfully ✓');
+  driveSync().then(ok => toast(ok ? 'Saved to Drive ✓' : 'Saved locally (sign in to sync)'));
+
 }
 
 // ── Category management ───────────────────────────────────
