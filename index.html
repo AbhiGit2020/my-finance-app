@@ -5,8 +5,24 @@
 <title>My Finance App — Dashboard</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="js/store.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="js/store.js"></script>
+<style>
+.chart-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
+.chart-title { font-size:0.88rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:16px; }
+.chart-wrap { position:relative; height:280px; }
+.lifetime-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:24px; }
+.lkpi { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; }
+.lkpi-label { font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; }
+.lkpi-value { font-size:1.5rem; font-weight:700; font-family:'IBM Plex Mono',monospace; }
+.lkpi-sub { font-size:0.78rem; color:var(--text-muted); margin-top:4px; }
+.drill-section { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
+.year-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px; }
+.year-tab { background:var(--bg3); border:1px solid var(--border); color:var(--text-muted); border-radius:6px; padding:5px 14px; font-size:0.84rem; font-weight:600; cursor:pointer; transition:all 0.15s; }
+.year-tab:hover { border-color:var(--teal); color:var(--teal); }
+.year-tab.active { background:var(--teal); border-color:var(--teal); color:#fff; }
+</style>
 </head>
 <body>
 
@@ -20,218 +36,346 @@
     <a href="assets.html">Assets</a>
   </div>
   <div class="nav-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-    <div style="display:flex;gap:6px"><button id="authBtn" class="btn btn-secondary btn-sm" onclick="signIn()">🔑 Sign in with Google</button><button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Excel</button><button class="btn btn-secondary btn-sm" onclick="driveSync(true)">☁️ Save & Backup</button></div>
-    <div id="authStatus" style="font-size:0.72rem;color:var(--yellow)">⚠️ Not signed in</div><div id="driveStatus" style="font-size:0.72rem;color:var(--text-muted)"></div>
+    <div style="display:flex;gap:6px">
+      <button id="authBtn" class="btn btn-secondary btn-sm" onclick="signIn()">🔑 Sign in with Google</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Excel</button>
+      <button class="btn btn-secondary btn-sm" onclick="driveSync(true)">☁️ Save & Backup</button>
+    </div>
+    <div id="authStatus" style="font-size:0.72rem;color:var(--yellow)">⚠️ Not signed in</div>
+    <div id="driveStatus" style="font-size:0.72rem;color:var(--text-muted)"></div>
   </div>
 </nav>
 
 <div class="page">
   <div class="page-title">📊 Dashboard</div>
 
-  <!-- Year selector -->
-  <div class="flex flex-gap flex-center mb-16">
-    <div class="form-group">
-      <label>Year</label>
-      <select id="dashYear" class="input-md" onchange="render()"></select>
-    </div>
-    <div class="form-group">
-      <label>Compare to</label>
-      <select id="dashYearPrev" class="input-md" onchange="render()"></select>
-    </div>
+  <!-- Lifetime KPIs -->
+  <div class="lifetime-grid" id="lifetimeKPIs"></div>
+
+  <!-- Annual Charts -->
+  <div class="chart-card">
+    <div class="chart-title">Annual Income vs Outgoing vs Savings (S$)</div>
+    <div class="chart-wrap"><canvas id="annualChart"></canvas></div>
   </div>
 
-  <!-- KPI strip -->
-  <div class="kpi-grid" id="kpiGrid"></div>
-
-  <div class="grid-2">
-    <!-- Income vs Outgoing -->
-    <div class="card">
-      <div class="card-title">Monthly Cash Flow — <span id="cfYear"></span></div>
-      <div class="tbl-wrap"><table id="cfTable"></table></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+    <div class="chart-card" style="margin-bottom:0">
+      <div class="chart-title">Investment % of Income by Year</div>
+      <div class="chart-wrap"><canvas id="invPctChart"></canvas></div>
     </div>
-
-    <!-- Savings rate -->
-    <div class="card">
-      <div class="card-title">Savings Rate % by Month</div>
-      <div class="tbl-wrap"><table id="savingsTable"></table></div>
+    <div class="chart-card" style="margin-bottom:0">
+      <div class="chart-title">Savings Rate % by Year</div>
+      <div class="chart-wrap"><canvas id="savingsChart"></canvas></div>
     </div>
   </div>
 
-  <!-- Income breakdown -->
-  <div class="card">
-    <div class="card-title">Income by Category — <span id="incYear"></span></div>
-    <div class="tbl-wrap"><table id="incTable"></table></div>
-  </div>
-
-  <!-- Outgoing breakdown -->
-  <div class="card">
-    <div class="card-title">Outgoing by Group — <span id="outYear"></span></div>
-    <div class="tbl-wrap"><table id="outTable"></table></div>
-  </div>
-
-  <!-- Discretionary spend -->
-  <div class="card">
-    <div class="card-title">Discretionary Spend — <span id="discYear"></span></div>
-    <div class="tbl-wrap"><table id="discTable"></table></div>
+  <!-- Year drill-down -->
+  <div class="drill-section">
+    <div class="chart-title">📅 Year Drill-Down — click a year to explore</div>
+    <div class="year-tabs" id="yearTabs"></div>
+    <div id="drillContent"></div>
   </div>
 </div>
 
 <div class="toast-container" id="toastContainer"></div>
 
 <script>
-// populate year selects
-const currentYear = new Date().getFullYear();
-const years = [];
-for(let y=currentYear-5;y<=currentYear+2;y++) years.push(y);
+let annualChart, invPctChart, savingsChart;
+let selectedYear = null;
 
-function populateSelect(id, selectedVal) {
-  const sel = document.getElementById(id);
-  sel.innerHTML = '';
-  years.forEach(y => {
-    const o = document.createElement('option');
-    o.value = y; o.textContent = y;
-    if(y === selectedVal) o.selected = true;
-    sel.appendChild(o);
-  });
+function fmt(n) { return Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+function fmtPct(n) { return Number(n||0).toFixed(1) + '%'; }
+
+function getYears() {
+  const recs = loadFinanceRecords();
+  const years = [...new Set(recs.map(r=>r.year))].sort();
+  return years;
 }
 
-populateSelect('dashYear', currentYear);
-populateSelect('dashYearPrev', currentYear - 1);
-
-function fmt(n) { return Number(n).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0}); }
-function fmtPct(n) { return (n >= 0 ? '+' : '') + Number(n).toFixed(1) + '%'; }
-
-function buildMonthHeader(extraCols=[]) {
-  const cols = ['Category',...MONTHS,...extraCols];
-  return '<thead><tr>' + cols.map((c,i)=>`<th>${c}</th>`).join('') + '</tr></thead>';
-}
-
-function amountByYearSection(year, section) {
-  const cats = loadCategories().filter(c => c.section === section);
-  const recs = loadFinanceRecords().filter(r => r.year === year);
-  const monthly = {};
-  cats.forEach(c => { monthly[c.category] = Array(12).fill(0); });
+function getAnnualTotals(year) {
+  const recs = loadFinanceRecords().filter(r=>r.year===year);
+  const cats = loadCategories();
+  let income=0, outgoing=0, invested=0;
   recs.forEach(r => {
-    if(monthly[r.category] !== undefined) monthly[r.category][r.month-1] += r.amount;
+    if(r.type==='income') income += r.amount;
+    else if(r.type==='expense'||r.type==='tax') outgoing += r.amount;
+    else if(r.type==='investment') invested += r.amount;
   });
-  return { cats, monthly };
+  return { income, outgoing, invested, savings: income - outgoing - invested };
 }
 
 function render() {
-  const year = parseInt(document.getElementById('dashYear').value);
-  const prevYear = parseInt(document.getElementById('dashYearPrev').value);
+  const years = getYears();
+  if(!years.length) {
+    renderEmpty();
+    return;
+  }
 
-  const inc = amountByYearSection(year, 'incoming');
-  const out = amountByYearSection(year, 'outgoing');
+  // Lifetime KPIs
+  let ltIncome=0, ltOutgoing=0, ltInvested=0;
+  years.forEach(y => {
+    const t = getAnnualTotals(y);
+    ltIncome += t.income; ltOutgoing += t.outgoing; ltInvested += t.invested;
+  });
+  const ltSavings = ltIncome - ltOutgoing - ltInvested;
+  const ltSavRate = ltIncome > 0 ? (ltSavings/ltIncome*100) : 0;
+  const ltInvRate = ltIncome > 0 ? (ltInvested/ltIncome*100) : 0;
 
-  // monthly totals
-  const incMonthly = MONTHS.map((_,i) => Object.values(inc.monthly).reduce((s,v)=>s+v[i],0));
-  const outMonthly = MONTHS.map((_,i) => Object.values(out.monthly).reduce((s,v)=>s+v[i],0));
-  const netMonthly = MONTHS.map((_,i) => incMonthly[i] - outMonthly[i]);
-  const savingsRate = MONTHS.map((_,i) => incMonthly[i] > 0 ? (netMonthly[i]/incMonthly[i])*100 : 0);
-
-  const totalInc = incMonthly.reduce((a,b)=>a+b,0);
-  const totalOut = outMonthly.reduce((a,b)=>a+b,0);
-  const totalNet = totalInc - totalOut;
-
-  // prev year
-  const incPrev = amountByYearSection(prevYear,'incoming');
-  const outPrev = amountByYearSection(prevYear,'outgoing');
-  const totalIncPrev = Object.values(incPrev.monthly).reduce((s,v)=>s+v.reduce((a,b)=>a+b,0),0);
-  const totalOutPrev = Object.values(outPrev.monthly).reduce((s,v)=>s+v.reduce((a,b)=>a+b,0),0);
-
-  // KPIs
-  const kpiGrid = document.getElementById('kpiGrid');
-  const incDelta = totalIncPrev > 0 ? ((totalInc-totalIncPrev)/totalIncPrev*100) : 0;
-  const outDelta = totalOutPrev > 0 ? ((totalOut-totalOutPrev)/totalOutPrev*100) : 0;
-  const savRate = totalInc > 0 ? (totalNet/totalInc*100) : 0;
-  kpiGrid.innerHTML = `
-    <div class="kpi teal"><div class="kpi-label">Total Income ${year}</div><div class="kpi-value neutral">S$ ${fmt(totalInc)}</div><div class="text-muted mt-4" style="font-size:0.78rem">${fmtPct(incDelta)} vs ${prevYear}</div></div>
-    <div class="kpi ${totalOut>totalOutPrev?'red':'green'}"><div class="kpi-label">Total Outgoing ${year}</div><div class="kpi-value ${totalOut>totalOutPrev?'neg':'pos'}">S$ ${fmt(totalOut)}</div><div class="text-muted mt-4" style="font-size:0.78rem">${fmtPct(outDelta)} vs ${prevYear}</div></div>
-    <div class="kpi ${totalNet>=0?'green':'red'}"><div class="kpi-label">Net Savings ${year}</div><div class="kpi-value ${totalNet>=0?'pos':'neg'}">S$ ${fmt(totalNet)}</div></div>
-    <div class="kpi ${savRate>=30?'green':savRate>=15?'teal':'red'}"><div class="kpi-label">Savings Rate</div><div class="kpi-value ${savRate>=20?'pos':'neg'}">${savRate.toFixed(1)}%</div></div>
+  document.getElementById('lifetimeKPIs').innerHTML = `
+    <div class="lkpi" style="border-color:var(--teal)">
+      <div class="lkpi-label">Lifetime Income</div>
+      <div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(ltIncome)}</div>
+      <div class="lkpi-sub">Across ${years.length} year${years.length>1?'s':''} (${years[0]}–${years[years.length-1]})</div>
+    </div>
+    <div class="lkpi" style="border-color:var(--red)">
+      <div class="lkpi-label">Lifetime Outgoing</div>
+      <div class="lkpi-value" style="color:var(--red)">S$ ${fmt(ltOutgoing)}</div>
+      <div class="lkpi-sub">${fmtPct(ltIncome>0?ltOutgoing/ltIncome*100:0)} of total income</div>
+    </div>
+    <div class="lkpi" style="border-color:var(--yellow)">
+      <div class="lkpi-label">Lifetime Invested</div>
+      <div class="lkpi-value" style="color:var(--yellow)">S$ ${fmt(ltInvested)}</div>
+      <div class="lkpi-sub">${fmtPct(ltInvRate)} of total income</div>
+    </div>
+    <div class="lkpi" style="border-color:var(--green)">
+      <div class="lkpi-label">Lifetime Net Savings</div>
+      <div class="lkpi-value" style="color:var(--green)">S$ ${fmt(ltSavings)}</div>
+      <div class="lkpi-sub">Avg savings rate ${fmtPct(ltSavRate)}</div>
+    </div>
+    <div class="lkpi">
+      <div class="lkpi-label">Years Tracked</div>
+      <div class="lkpi-value" style="color:var(--text)">${years.length}</div>
+      <div class="lkpi-sub">${years.join(', ')}</div>
+    </div>
   `;
 
-  // Cash flow table
-  document.getElementById('cfYear').textContent = year;
-  const cfTable = document.getElementById('cfTable');
-  let cfHTML = buildMonthHeader(['YTD']);
-  cfHTML += '<tbody>';
-  const cfRows = [
-    {label:'Income', vals:incMonthly, cls:''},
-    {label:'Outgoing', vals:outMonthly, cls:'neg'},
-    {label:'Net', vals:netMonthly, cls:''},
-  ];
-  cfRows.forEach(row => {
-    const ytd = row.vals.reduce((a,b)=>a+b,0);
-    const isTotal = row.label === 'Net';
-    const trCls = isTotal ? 'class="total-row"' : '';
-    cfHTML += `<tr ${trCls}><td>${row.label}</td>`;
-    row.vals.forEach(v => {
-      const cls = row.label==='Net' ? (v>=0?'pos':'neg') : '';
-      cfHTML += `<td class="${cls}">${fmt(v)}</td>`;
-    });
-    const ytdCls = row.label==='Net' ? (ytd>=0?'pos':'neg') : '';
-    cfHTML += `<td class="${ytdCls} bold">${fmt(ytd)}</td></tr>`;
+  // Chart data
+  const annualData = years.map(y => getAnnualTotals(y));
+  const incomes    = annualData.map(d=>d.income);
+  const outgoings  = annualData.map(d=>d.outgoing);
+  const investeds  = annualData.map(d=>d.invested);
+  const savings    = annualData.map(d=>d.savings);
+  const savRates   = annualData.map(d=>d.income>0?d.savings/d.income*100:0);
+  const invRates   = annualData.map(d=>d.income>0?d.invested/d.income*100:0);
+
+  const chartDefaults = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color:'#8b949e', font:{size:11} } },
+      tooltip: { callbacks: { label: ctx => ` S$ ${fmt(ctx.raw)}` } }
+    },
+    scales: {
+      x: { ticks:{color:'#8b949e'}, grid:{color:'rgba(255,255,255,0.05)'} },
+      y: { ticks:{color:'#8b949e', callback:v=>'S$'+fmt(v)}, grid:{color:'rgba(255,255,255,0.05)'} }
+    }
+  };
+
+  // Annual bar chart
+  if(annualChart) annualChart.destroy();
+  annualChart = new Chart(document.getElementById('annualChart'), {
+    type: 'bar',
+    data: {
+      labels: years,
+      datasets: [
+        { label:'Income',   data:incomes,   backgroundColor:'rgba(6,138,145,0.75)',  borderRadius:4 },
+        { label:'Outgoing', data:outgoings, backgroundColor:'rgba(248,81,73,0.65)',  borderRadius:4 },
+        { label:'Invested', data:investeds, backgroundColor:'rgba(210,153,34,0.65)', borderRadius:4 },
+        { label:'Savings',  data:savings,   backgroundColor:'rgba(63,185,80,0.65)',  borderRadius:4 },
+      ]
+    },
+    options: {
+      ...chartDefaults,
+      plugins: {
+        ...chartDefaults.plugins,
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const inc = incomes[ctx.dataIndex];
+              const pct = inc > 0 ? (ctx.raw/inc*100).toFixed(1) : 0;
+              return ` S$ ${fmt(ctx.raw)}  (${pct}% of income)`;
+            }
+          }
+        }
+      }
+    }
   });
-  cfHTML += '</tbody>';
-  cfTable.innerHTML = cfHTML;
 
-  // Savings rate table
-  const savingsTable = document.getElementById('savingsTable');
-  let sHTML = buildMonthHeader(['Avg']);
-  sHTML += '<tbody><tr><td>Savings %</td>';
-  savingsRate.forEach(v => { sHTML += `<td class="${v>=20?'pos':v>=10?'':'neg'}">${v.toFixed(0)}%</td>`; });
-  const avgSav = savingsRate.reduce((a,b)=>a+b,0)/12;
-  sHTML += `<td class="${avgSav>=20?'pos':'neg'} bold">${avgSav.toFixed(1)}%</td></tr></tbody>`;
-  savingsTable.innerHTML = sHTML;
-
-  // Income breakdown
-  document.getElementById('incYear').textContent = year;
-  const incTable = document.getElementById('incTable');
-  let iHTML = buildMonthHeader(['YTD']);
-  iHTML += '<tbody>';
-  inc.cats.forEach(cat => {
-    const vals = inc.monthly[cat.category] || Array(12).fill(0);
-    const ytd = vals.reduce((a,b)=>a+b,0);
-    iHTML += `<tr><td>${cat.category}</td>${vals.map(v=>`<td>${fmt(v)}</td>`).join('')}<td class="bold">${fmt(ytd)}</td></tr>`;
+  // Investment % chart
+  if(invPctChart) invPctChart.destroy();
+  invPctChart = new Chart(document.getElementById('invPctChart'), {
+    type: 'bar',
+    data: {
+      labels: years,
+      datasets: [{ label:'Investment % of Income', data:invRates, backgroundColor:'rgba(210,153,34,0.75)', borderRadius:4 }]
+    },
+    options: {
+      ...chartDefaults,
+      plugins: { ...chartDefaults.plugins, tooltip:{ callbacks:{ label:ctx=>` ${ctx.raw.toFixed(1)}%` } } },
+      scales: {
+        x: chartDefaults.scales.x,
+        y: { ticks:{color:'#8b949e', callback:v=>v+'%'}, grid:{color:'rgba(255,255,255,0.05)'} }
+      }
+    }
   });
-  const incYTD = incMonthly.reduce((a,b)=>a+b,0);
-  iHTML += `<tr class="total-row"><td>TOTAL</td>${incMonthly.map(v=>`<td>${fmt(v)}</td>`).join('')}<td>${fmt(incYTD)}</td></tr>`;
-  iHTML += '</tbody>';
-  incTable.innerHTML = iHTML;
 
-  // Outgoing breakdown by group
-  document.getElementById('outYear').textContent = year;
-  const groups = ['Living','Insurance','Taxes','Investments'];
-  const outTable = document.getElementById('outTable');
-  let oHTML = buildMonthHeader(['YTD']);
-  oHTML += '<tbody>';
-  groups.forEach(grp => {
-    const grpCats = out.cats.filter(c=>c.group===grp);
-    if(!grpCats.length) return;
-    oHTML += `<tr class="group-header"><td colspan="${2+MONTHS.length}">${grp}</td></tr>`;
-    grpCats.forEach(cat => {
-      const vals = out.monthly[cat.category] || Array(12).fill(0);
-      const ytd = vals.reduce((a,b)=>a+b,0);
-      oHTML += `<tr><td style="padding-left:20px">${cat.category}</td>${vals.map(v=>`<td>${fmt(v)}</td>`).join('')}<td class="bold">${fmt(ytd)}</td></tr>`;
-    });
+  // Savings rate chart
+  if(savingsChart) savingsChart.destroy();
+  savingsChart = new Chart(document.getElementById('savingsChart'), {
+    type: 'line',
+    data: {
+      labels: years,
+      datasets: [{ label:'Savings Rate %', data:savRates, borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,0.1)', tension:0.3, fill:true, pointBackgroundColor:'#3fb950', pointRadius:5 }]
+    },
+    options: {
+      ...chartDefaults,
+      plugins: { ...chartDefaults.plugins, tooltip:{ callbacks:{ label:ctx=>` ${ctx.raw.toFixed(1)}%` } } },
+      scales: {
+        x: chartDefaults.scales.x,
+        y: { ticks:{color:'#8b949e', callback:v=>v+'%'}, grid:{color:'rgba(255,255,255,0.05)'} }
+      }
+    }
   });
-  oHTML += `<tr class="total-row"><td>TOTAL</td>${outMonthly.map(v=>`<td>${fmt(v)}</td>`).join('')}<td>${fmt(outMonthly.reduce((a,b)=>a+b,0))}</td></tr>`;
-  oHTML += '</tbody>';
-  outTable.innerHTML = oHTML;
 
-  // Discretionary
-  document.getElementById('discYear').textContent = year;
-  const ue = loadUselessExpenses().filter(e=>e.year===year);
-  const discMonthly = Array(12).fill(0);
-  ue.forEach(e => { if(e.month>=1&&e.month<=12) discMonthly[e.month-1] += e.amount_sgd; });
-  const discTable = document.getElementById('discTable');
-  let dHTML = buildMonthHeader(['YTD']);
-  dHTML += '<tbody><tr><td>Discretionary Spend</td>';
-  discMonthly.forEach(v => { dHTML += `<td class="${v>0?'neg':''}">${fmt(v)}</td>`; });
-  dHTML += `<td class="neg bold">${fmt(discMonthly.reduce((a,b)=>a+b,0))}</td></tr></tbody>`;
-  discTable.innerHTML = dHTML;
+  // Year tabs
+  if(!selectedYear || !years.includes(selectedYear)) selectedYear = years[years.length-1];
+  const tabsEl = document.getElementById('yearTabs');
+  tabsEl.innerHTML = years.map(y=>`<button class="year-tab ${y===selectedYear?'active':''}" onclick="selectYear(${y})">${y}</button>`).join('');
+  renderDrill(selectedYear);
+}
+
+function selectYear(y) {
+  selectedYear = y;
+  document.querySelectorAll('.year-tab').forEach(b=>b.classList.toggle('active', parseInt(b.textContent)===y));
+  renderDrill(y);
+}
+
+function renderDrill(year) {
+  const t = getAnnualTotals(year);
+  const recs = loadFinanceRecords().filter(r=>r.year===year);
+  const cats = loadCategories();
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Monthly income/outgoing
+  const monthly = MONTHS.map((_,i)=>{
+    const m = i+1;
+    const inc = recs.filter(r=>r.month===m&&r.type==='income').reduce((s,r)=>s+r.amount,0);
+    const out = recs.filter(r=>r.month===m&&(r.type==='expense'||r.type==='tax')).reduce((s,r)=>s+r.amount,0);
+    const inv = recs.filter(r=>r.month===m&&r.type==='investment').reduce((s,r)=>s+r.amount,0);
+    const sav = inc - out - inv;
+    const savPct = inc>0?(sav/inc*100):0;
+    return {inc,out,inv,sav,savPct};
+  });
+
+  // Income by category
+  const incCats = cats.filter(c=>c.section==='incoming');
+  const outGroups = ['Living','Insurance','Taxes','Investments'];
+
+  let html = `
+    <!-- Year summary KPIs -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
+      <div class="lkpi" style="border-color:var(--teal)"><div class="lkpi-label">Income ${year}</div><div class="lkpi-value" style="color:var(--teal);font-size:1.1rem">S$ ${fmt(t.income)}</div></div>
+      <div class="lkpi" style="border-color:var(--red)"><div class="lkpi-label">Outgoing ${year}</div><div class="lkpi-value" style="color:var(--red);font-size:1.1rem">S$ ${fmt(t.outgoing)}</div><div class="lkpi-sub">${fmtPct(t.income>0?t.outgoing/t.income*100:0)} of income</div></div>
+      <div class="lkpi" style="border-color:var(--yellow)"><div class="lkpi-label">Invested ${year}</div><div class="lkpi-value" style="color:var(--yellow);font-size:1.1rem">S$ ${fmt(t.invested)}</div><div class="lkpi-sub">${fmtPct(t.income>0?t.invested/t.income*100:0)} of income</div></div>
+      <div class="lkpi" style="border-color:var(--green)"><div class="lkpi-label">Net Savings ${year}</div><div class="lkpi-value" style="color:var(--green);font-size:1.1rem">S$ ${fmt(t.savings)}</div><div class="lkpi-sub">Savings rate ${fmtPct(t.income>0?t.savings/t.income*100:0)}</div></div>
+    </div>
+
+    <!-- Monthly cashflow table -->
+    <div style="overflow-x:auto;margin-bottom:20px">
+      <table style="width:100%;border-collapse:collapse;font-size:0.83rem">
+        <thead><tr>
+          <th style="text-align:left;padding:8px 10px;color:var(--text-muted);background:var(--bg3)">Metric</th>
+          ${MONTHS.map(m=>`<th style="padding:8px 10px;color:var(--text-muted);background:var(--bg3)">${m}</th>`).join('')}
+          <th style="padding:8px 10px;color:var(--text-muted);background:var(--bg3)">YTD</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td style="padding:7px 10px;font-weight:600">Income</td>
+            ${monthly.map(m=>`<td style="padding:7px 10px;text-align:right">${fmt(m.inc)}</td>`).join('')}
+            <td style="padding:7px 10px;text-align:right;font-weight:700">${fmt(t.income)}</td>
+          </tr>
+          <tr>
+            <td style="padding:7px 10px;font-weight:600">Outgoing</td>
+            ${monthly.map(m=>`<td style="padding:7px 10px;text-align:right;color:var(--red)">${fmt(m.out)}</td>`).join('')}
+            <td style="padding:7px 10px;text-align:right;font-weight:700;color:var(--red)">${fmt(t.outgoing)}</td>
+          </tr>
+          <tr>
+            <td style="padding:7px 10px;font-weight:600">Invested</td>
+            ${monthly.map(m=>`<td style="padding:7px 10px;text-align:right;color:var(--yellow)">${fmt(m.inv)}</td>`).join('')}
+            <td style="padding:7px 10px;text-align:right;font-weight:700;color:var(--yellow)">${fmt(t.invested)}</td>
+          </tr>
+          <tr style="background:var(--bg3);border-top:1px solid var(--border2)">
+            <td style="padding:7px 10px;font-weight:700">Net Savings</td>
+            ${monthly.map(m=>`<td style="padding:7px 10px;text-align:right;font-weight:600;color:${m.sav>=0?'var(--green)':'var(--red)'}">${fmt(m.sav)}</td>`).join('')}
+            <td style="padding:7px 10px;text-align:right;font-weight:700;color:${t.savings>=0?'var(--green)':'var(--red)'}">${fmt(t.savings)}</td>
+          </tr>
+          <tr>
+            <td style="padding:7px 10px;font-weight:600;color:var(--text-muted)">Savings %</td>
+            ${monthly.map(m=>`<td style="padding:7px 10px;text-align:right;font-size:0.78rem;color:${m.savPct>=20?'var(--green)':m.savPct>0?'var(--yellow)':'var(--text-muted)'}">${m.savPct.toFixed(0)}%</td>`).join('')}
+            <td style="padding:7px 10px;text-align:right;font-size:0.78rem;font-weight:700;color:${t.income>0&&t.savings/t.income>=0.2?'var(--green)':'var(--yellow)'}">${fmtPct(t.income>0?t.savings/t.income*100:0)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Income breakdown -->
+    <details style="margin-bottom:12px">
+      <summary>Income Breakdown — ${year}</summary>
+      <div class="details-content" style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+          <thead><tr>
+            <th style="text-align:left;padding:7px 10px;color:var(--text-muted)">Category</th>
+            ${MONTHS.map(m=>`<th style="padding:7px 10px;color:var(--text-muted)">${m}</th>`).join('')}
+            <th style="padding:7px 10px;color:var(--text-muted)">YTD</th>
+          </tr></thead>
+          <tbody>
+            ${incCats.map(cat=>{
+              const vals = MONTHS.map((_,i)=>recs.filter(r=>r.month===i+1&&r.category===cat.category).reduce((s,r)=>s+r.amount,0));
+              const ytd = vals.reduce((a,b)=>a+b,0);
+              return `<tr><td style="padding:6px 10px;font-weight:500">${cat.category}</td>${vals.map(v=>`<td style="padding:6px 10px;text-align:right">${fmt(v)}</td>`).join('')}<td style="padding:6px 10px;text-align:right;font-weight:700">${fmt(ytd)}</td></tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <!-- Outgoing breakdown -->
+    <details>
+      <summary>Outgoing Breakdown — ${year}</summary>
+      <div class="details-content" style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+          <thead><tr>
+            <th style="text-align:left;padding:7px 10px;color:var(--text-muted)">Category</th>
+            ${MONTHS.map(m=>`<th style="padding:7px 10px;color:var(--text-muted)">${m}</th>`).join('')}
+            <th style="padding:7px 10px;color:var(--text-muted)">YTD</th>
+          </tr></thead>
+          <tbody>
+            ${outGroups.map(grp=>{
+              const grpCats = cats.filter(c=>c.section==='outgoing'&&c.group===grp);
+              if(!grpCats.length) return '';
+              return `<tr style="background:rgba(6,138,145,0.08)"><td colspan="${14}" style="padding:5px 10px;color:var(--teal);font-weight:700;font-size:0.78rem;text-transform:uppercase">${grp}</td></tr>`
+                + grpCats.map(cat=>{
+                  const vals = MONTHS.map((_,i)=>recs.filter(r=>r.month===i+1&&r.category===cat.category).reduce((s,r)=>s+r.amount,0));
+                  const ytd = vals.reduce((a,b)=>a+b,0);
+                  return `<tr><td style="padding:6px 10px;padding-left:20px">${cat.category}</td>${vals.map(v=>`<td style="padding:6px 10px;text-align:right">${fmt(v)}</td>`).join('')}<td style="padding:6px 10px;text-align:right;font-weight:700">${fmt(ytd)}</td></tr>`;
+                }).join('');
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  `;
+
+  document.getElementById('drillContent').innerHTML = html;
+}
+
+function renderEmpty() {
+  document.getElementById('lifetimeKPIs').innerHTML = `
+    <div class="lkpi" style="grid-column:1/-1;text-align:center;padding:40px">
+      <div class="lkpi-label">No data yet</div>
+      <div style="color:var(--text-muted);margin-top:8px">Go to <a href="input.html" style="color:var(--teal)">Finance Input</a> to start entering your data.</div>
+    </div>`;
+  document.getElementById('drillContent').innerHTML = '';
+  document.getElementById('yearTabs').innerHTML = '';
 }
 
 window.onDataLoaded = render;
