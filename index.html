@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Finance App — Dashboard</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/store.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="index.html">💰 MyFinance</a>
+  <div class="nav-links">
+    <a href="index.html" class="active">Dashboard</a>
+    <a href="input.html">Finance Input</a>
+    <a href="investments.html">Investments</a>
+    <a href="stocks.html">Stocks</a>
+    <a href="assets.html">Assets</a>
+  </div>
+  <div class="nav-actions">
+    <button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Export Excel</button>
+    <button class="btn btn-secondary btn-sm" onclick="exportJsonBackup()">💾 Backup JSON</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-title">📊 Dashboard</div>
+
+  <!-- Year selector -->
+  <div class="flex flex-gap flex-center mb-16">
+    <div class="form-group">
+      <label>Year</label>
+      <select id="dashYear" class="input-md" onchange="render()"></select>
+    </div>
+    <div class="form-group">
+      <label>Compare to</label>
+      <select id="dashYearPrev" class="input-md" onchange="render()"></select>
+    </div>
+  </div>
+
+  <!-- KPI strip -->
+  <div class="kpi-grid" id="kpiGrid"></div>
+
+  <div class="grid-2">
+    <!-- Income vs Outgoing -->
+    <div class="card">
+      <div class="card-title">Monthly Cash Flow — <span id="cfYear"></span></div>
+      <div class="tbl-wrap"><table id="cfTable"></table></div>
+    </div>
+
+    <!-- Savings rate -->
+    <div class="card">
+      <div class="card-title">Savings Rate % by Month</div>
+      <div class="tbl-wrap"><table id="savingsTable"></table></div>
+    </div>
+  </div>
+
+  <!-- Income breakdown -->
+  <div class="card">
+    <div class="card-title">Income by Category — <span id="incYear"></span></div>
+    <div class="tbl-wrap"><table id="incTable"></table></div>
+  </div>
+
+  <!-- Outgoing breakdown -->
+  <div class="card">
+    <div class="card-title">Outgoing by Group — <span id="outYear"></span></div>
+    <div class="tbl-wrap"><table id="outTable"></table></div>
+  </div>
+
+  <!-- Discretionary spend -->
+  <div class="card">
+    <div class="card-title">Discretionary Spend — <span id="discYear"></span></div>
+    <div class="tbl-wrap"><table id="discTable"></table></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// populate year selects
+const currentYear = new Date().getFullYear();
+const years = [];
+for(let y=currentYear-5;y<=currentYear+2;y++) years.push(y);
+
+function populateSelect(id, selectedVal) {
+  const sel = document.getElementById(id);
+  sel.innerHTML = '';
+  years.forEach(y => {
+    const o = document.createElement('option');
+    o.value = y; o.textContent = y;
+    if(y === selectedVal) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+populateSelect('dashYear', currentYear);
+populateSelect('dashYearPrev', currentYear - 1);
+
+function fmt(n) { return Number(n).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+function fmtPct(n) { return (n >= 0 ? '+' : '') + Number(n).toFixed(1) + '%'; }
+
+function buildMonthHeader(extraCols=[]) {
+  const cols = ['Category',...MONTHS,...extraCols];
+  return '<thead><tr>' + cols.map((c,i)=>`<th>${c}</th>`).join('') + '</tr></thead>';
+}
+
+function amountByYearSection(year, section) {
+  const cats = loadCategories().filter(c => c.section === section);
+  const recs = loadFinanceRecords().filter(r => r.year === year);
+  const monthly = {};
+  cats.forEach(c => { monthly[c.category] = Array(12).fill(0); });
+  recs.forEach(r => {
+    if(monthly[r.category] !== undefined) monthly[r.category][r.month-1] += r.amount;
+  });
+  return { cats, monthly };
+}
+
+function render() {
+  const year = parseInt(document.getElementById('dashYear').value);
+  const prevYear = parseInt(document.getElementById('dashYearPrev').value);
+
+  const inc = amountByYearSection(year, 'incoming');
+  const out = amountByYearSection(year, 'outgoing');
+
+  // monthly totals
+  const incMonthly = MONTHS.map((_,i) => Object.values(inc.monthly).reduce((s,v)=>s+v[i],0));
+  const outMonthly = MONTHS.map((_,i) => Object.values(out.monthly).reduce((s,v)=>s+v[i],0));
+  const netMonthly = MONTHS.map((_,i) => incMonthly[i] - outMonthly[i]);
+  const savingsRate = MONTHS.map((_,i) => incMonthly[i] > 0 ? (netMonthly[i]/incMonthly[i])*100 : 0);
+
+  const totalInc = incMonthly.reduce((a,b)=>a+b,0);
+  const totalOut = outMonthly.reduce((a,b)=>a+b,0);
+  const totalNet = totalInc - totalOut;
+
+  // prev year
+  const incPrev = amountByYearSection(prevYear,'incoming');
+  const outPrev = amountByYearSection(prevYear,'outgoing');
+  const totalIncPrev = Object.values(incPrev.monthly).reduce((s,v)=>s+v.reduce((a,b)=>a+b,0),0);
+  const totalOutPrev = Object.values(outPrev.monthly).reduce((s,v)=>s+v.reduce((a,b)=>a+b,0),0);
+
+  // KPIs
+  const kpiGrid = document.getElementById('kpiGrid');
+  const incDelta = totalIncPrev > 0 ? ((totalInc-totalIncPrev)/totalIncPrev*100) : 0;
+  const outDelta = totalOutPrev > 0 ? ((totalOut-totalOutPrev)/totalOutPrev*100) : 0;
+  const savRate = totalInc > 0 ? (totalNet/totalInc*100) : 0;
+  kpiGrid.innerHTML = `
+    <div class="kpi teal"><div class="kpi-label">Total Income ${year}</div><div class="kpi-value neutral">S$ ${fmt(totalInc)}</div><div class="text-muted mt-4" style="font-size:0.78rem">${fmtPct(incDelta)} vs ${prevYear}</div></div>
+    <div class="kpi ${totalOut>totalOutPrev?'red':'green'}"><div class="kpi-label">Total Outgoing ${year}</div><div class="kpi-value ${totalOut>totalOutPrev?'neg':'pos'}">S$ ${fmt(totalOut)}</div><div class="text-muted mt-4" style="font-size:0.78rem">${fmtPct(outDelta)} vs ${prevYear}</div></div>
+    <div class="kpi ${totalNet>=0?'green':'red'}"><div class="kpi-label">Net Savings ${year}</div><div class="kpi-value ${totalNet>=0?'pos':'neg'}">S$ ${fmt(totalNet)}</div></div>
+    <div class="kpi ${savRate>=30?'green':savRate>=15?'teal':'red'}"><div class="kpi-label">Savings Rate</div><div class="kpi-value ${savRate>=20?'pos':'neg'}">${savRate.toFixed(1)}%</div></div>
+  `;
+
+  // Cash flow table
+  document.getElementById('cfYear').textContent = year;
+  const cfTable = document.getElementById('cfTable');
+  let cfHTML = buildMonthHeader(['YTD']);
+  cfHTML += '<tbody>';
+  const cfRows = [
+    {label:'Income', vals:incMonthly, cls:''},
+    {label:'Outgoing', vals:outMonthly, cls:'neg'},
+    {label:'Net', vals:netMonthly, cls:''},
+  ];
+  cfRows.forEach(row => {
+    const ytd = row.vals.reduce((a,b)=>a+b,0);
+    const isTotal = row.label === 'Net';
+    const trCls = isTotal ? 'class="total-row"' : '';
+    cfHTML += `<tr ${trCls}><td>${row.label}</td>`;
+    row.vals.forEach(v => {
+      const cls = row.label==='Net' ? (v>=0?'pos':'neg') : '';
+      cfHTML += `<td class="${cls}">${fmt(v)}</td>`;
+    });
+    const ytdCls = row.label==='Net' ? (ytd>=0?'pos':'neg') : '';
+    cfHTML += `<td class="${ytdCls} bold">${fmt(ytd)}</td></tr>`;
+  });
+  cfHTML += '</tbody>';
+  cfTable.innerHTML = cfHTML;
+
+  // Savings rate table
+  const savingsTable = document.getElementById('savingsTable');
+  let sHTML = buildMonthHeader(['Avg']);
+  sHTML += '<tbody><tr><td>Savings %</td>';
+  savingsRate.forEach(v => { sHTML += `<td class="${v>=20?'pos':v>=10?'':'neg'}">${v.toFixed(0)}%</td>`; });
+  const avgSav = savingsRate.reduce((a,b)=>a+b,0)/12;
+  sHTML += `<td class="${avgSav>=20?'pos':'neg'} bold">${avgSav.toFixed(1)}%</td></tr></tbody>`;
+  savingsTable.innerHTML = sHTML;
+
+  // Income breakdown
+  document.getElementById('incYear').textContent = year;
+  const incTable = document.getElementById('incTable');
+  let iHTML = buildMonthHeader(['YTD']);
+  iHTML += '<tbody>';
+  inc.cats.forEach(cat => {
+    const vals = inc.monthly[cat.category] || Array(12).fill(0);
+    const ytd = vals.reduce((a,b)=>a+b,0);
+    iHTML += `<tr><td>${cat.category}</td>${vals.map(v=>`<td>${fmt(v)}</td>`).join('')}<td class="bold">${fmt(ytd)}</td></tr>`;
+  });
+  const incYTD = incMonthly.reduce((a,b)=>a+b,0);
+  iHTML += `<tr class="total-row"><td>TOTAL</td>${incMonthly.map(v=>`<td>${fmt(v)}</td>`).join('')}<td>${fmt(incYTD)}</td></tr>`;
+  iHTML += '</tbody>';
+  incTable.innerHTML = iHTML;
+
+  // Outgoing breakdown by group
+  document.getElementById('outYear').textContent = year;
+  const groups = ['Living','Insurance','Taxes','Investments'];
+  const outTable = document.getElementById('outTable');
+  let oHTML = buildMonthHeader(['YTD']);
+  oHTML += '<tbody>';
+  groups.forEach(grp => {
+    const grpCats = out.cats.filter(c=>c.group===grp);
+    if(!grpCats.length) return;
+    oHTML += `<tr class="group-header"><td colspan="${2+MONTHS.length}">${grp}</td></tr>`;
+    grpCats.forEach(cat => {
+      const vals = out.monthly[cat.category] || Array(12).fill(0);
+      const ytd = vals.reduce((a,b)=>a+b,0);
+      oHTML += `<tr><td style="padding-left:20px">${cat.category}</td>${vals.map(v=>`<td>${fmt(v)}</td>`).join('')}<td class="bold">${fmt(ytd)}</td></tr>`;
+    });
+  });
+  oHTML += `<tr class="total-row"><td>TOTAL</td>${outMonthly.map(v=>`<td>${fmt(v)}</td>`).join('')}<td>${fmt(outMonthly.reduce((a,b)=>a+b,0))}</td></tr>`;
+  oHTML += '</tbody>';
+  outTable.innerHTML = oHTML;
+
+  // Discretionary
+  document.getElementById('discYear').textContent = year;
+  const ue = loadUselessExpenses().filter(e=>e.year===year);
+  const discMonthly = Array(12).fill(0);
+  ue.forEach(e => { if(e.month>=1&&e.month<=12) discMonthly[e.month-1] += e.amount_sgd; });
+  const discTable = document.getElementById('discTable');
+  let dHTML = buildMonthHeader(['YTD']);
+  dHTML += '<tbody><tr><td>Discretionary Spend</td>';
+  discMonthly.forEach(v => { dHTML += `<td class="${v>0?'neg':''}">${fmt(v)}</td>`; });
+  dHTML += `<td class="neg bold">${fmt(discMonthly.reduce((a,b)=>a+b,0))}</td></tr></tbody>`;
+  discTable.innerHTML = dHTML;
+}
+
+render();
+</script>
+</body>
+</html>

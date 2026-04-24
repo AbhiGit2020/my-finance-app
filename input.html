@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Finance App — Finance Input</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/store.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="index.html">💰 MyFinance</a>
+  <div class="nav-links">
+    <a href="index.html">Dashboard</a>
+    <a href="input.html" class="active">Finance Input</a>
+    <a href="investments.html">Investments</a>
+    <a href="stocks.html">Stocks</a>
+    <a href="assets.html">Assets</a>
+  </div>
+  <div class="nav-actions">
+    <button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Export Excel</button>
+    <button class="btn btn-secondary btn-sm" onclick="exportJsonBackup()">💾 Backup JSON</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-title">💰 Personal Finance Input</div>
+
+  <!-- Controls row -->
+  <div class="flex flex-gap flex-center mb-16 flex-wrap">
+    <div class="form-group">
+      <label>Year</label>
+      <select id="selYear" class="input-md" onchange="onYearChange()"></select>
+    </div>
+    <div class="form-group">
+      <label>Section</label>
+      <div class="flex flex-gap" style="gap:8px">
+        <button id="btnIncoming" class="btn btn-primary" onclick="setSection('incoming')">Incoming</button>
+        <button id="btnOutgoing" class="btn btn-secondary" onclick="setSection('outgoing')">Outgoing</button>
+      </div>
+    </div>
+    <div style="margin-left:auto; display:flex; gap:8px; align-items:flex-end">
+      <button class="btn btn-primary" onclick="savePivot()">💾 Save</button>
+      <button class="btn btn-secondary" onclick="exportSectionExcel()">⬇ Export Section</button>
+    </div>
+  </div>
+
+  <!-- Add category expander -->
+  <details id="addCatPanel">
+    <summary>➕ Add Category</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="newCatName" class="input-lg" placeholder="Category name">
+        </div>
+        <div class="form-group" id="groupDiv">
+          <label>Group</label>
+          <select id="newCatGroup" class="input-md">
+            <option>Living</option><option>Insurance</option><option>Taxes</option><option>Investments</option>
+          </select>
+        </div>
+        <div class="form-group" id="typeDiv">
+          <label>Type</label>
+          <select id="newCatType" class="input-md">
+            <option value="expense">expense</option><option value="tax">tax</option><option value="investment">investment</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Order</label>
+          <input type="number" id="newCatOrder" class="input-sm" value="99" min="1">
+        </div>
+        <div class="form-group">
+          <label>Effective from</label>
+          <input type="number" id="newCatYear" class="input-sm" value="2024" min="2000" max="2050">
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="addCategory()">Add</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- Manage categories -->
+  <details>
+    <summary>🧹 Manage Categories (Hide / Delete)</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group" style="flex:1">
+          <label>Category</label>
+          <select id="manageCatSel" class="wide"></select>
+        </div>
+        <div class="form-group" style="justify-content:flex-end; gap:8px; flex-direction:row; align-items:flex-end">
+          <button class="btn btn-secondary" onclick="hideCategory()">🙈 Hide / Retire</button>
+          <button class="btn btn-danger" onclick="deleteCategory()">🗑️ Delete</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- Calculator helper -->
+  <details>
+    <summary>🧮 Calculator Helper (comma-separated sum)</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label>Category</label>
+          <select id="calcCat" class="wide"></select>
+        </div>
+        <div class="form-group">
+          <label>Month</label>
+          <select id="calcMonth" class="input-md"></select>
+        </div>
+        <div class="form-group" style="flex:3">
+          <label>Values (comma-separated)</label>
+          <input type="text" id="calcValues" class="input-lg" placeholder="e.g. 450, 320, 80">
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="applyCalc()">Apply → Cell</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <hr class="divider">
+
+  <!-- Editable pivot table -->
+  <div class="section-header">
+    <div class="section-title" id="pivotTitle">Edit Monthly Values</div>
+  </div>
+  <div class="tbl-wrap">
+    <table class="edit-table" id="pivotTable"></table>
+  </div>
+
+  <!-- Monthly totals -->
+  <div class="card mt-16">
+    <div class="card-title">Monthly Totals</div>
+    <div class="tbl-wrap"><table id="totalsTable"></table></div>
+  </div>
+
+  <!-- Category totals by year -->
+  <div class="card">
+    <div class="card-title">Category Totals by Year</div>
+    <div class="tbl-wrap"><table id="histTable"></table></div>
+  </div>
+
+  <!-- Discretionary tracker (outgoing only) -->
+  <div id="discSection" class="hidden">
+    <hr class="divider">
+    <div class="section-title mb-16">🛍️ Discretionary / Useless Expense Tracker</div>
+    <p class="text-muted mb-16" style="font-size:0.84rem">Track avoidable or low-value expenses. These are NOT included in outgoing totals.</p>
+
+    <div class="panel">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="ueDate" class="input-md">
+        </div>
+        <div class="form-group">
+          <label>Amount (SGD)</label>
+          <input type="number" id="ueAmount" class="input-md" min="0" step="1" placeholder="0">
+        </div>
+        <div class="form-group" style="flex:3">
+          <label>Note / Comment</label>
+          <input type="text" id="ueNote" class="input-lg" placeholder="e.g. impulse buy, unused subscription">
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="addUselessExpense()">Add Entry</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Discretionary Summary — <span id="ueYear"></span></div>
+      <div class="tbl-wrap"><table id="ueTable"></table></div>
+    </div>
+
+    <details>
+      <summary>Entries for selected year</summary>
+      <div class="details-content">
+        <div class="tbl-wrap"><table id="ueEntriesTable"></table></div>
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────
+let currentYear = new Date().getFullYear();
+let currentSection = 'incoming';
+let pivotData = []; // [{Category, Jan..Dec}]
+
+// ── Init ──────────────────────────────────────────────────
+const yearSel = document.getElementById('selYear');
+for(let y=currentYear-5;y<=currentYear+10;y++){
+  const o = document.createElement('option');
+  o.value=y; o.textContent=y;
+  if(y===currentYear) o.selected=true;
+  yearSel.appendChild(o);
+}
+MONTHS.forEach(m => {
+  const o = document.createElement('option');
+  o.value=m; o.textContent=m;
+  document.getElementById('calcMonth').appendChild(o);
+});
+
+// Set default date for useless expense
+document.getElementById('ueDate').value = new Date().toISOString().slice(0,10);
+document.getElementById('newCatYear').value = currentYear;
+
+// ── Helpers ───────────────────────────────────────────────
+function toast(msg, type='success') {
+  const c = document.getElementById('toastContainer');
+  const d = document.createElement('div');
+  d.className = `toast ${type}`; d.textContent = msg;
+  c.appendChild(d);
+  setTimeout(()=>d.remove(), 3500);
+}
+
+function fmt(n) { return Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+
+function getActiveCats() {
+  const y = parseInt(yearSel.value);
+  return loadCategories().filter(c =>
+    c.section === currentSection &&
+    c.active &&
+    c.start_year <= y &&
+    (c.end_year === null || c.end_year === undefined || c.end_year >= y)
+  ).sort((a,b) => {
+    const GO = {Living:1,Insurance:2,Taxes:3,Investments:4,Primary:1};
+    const ga = (GO[a.group]||99), gb = (GO[b.group]||99);
+    if(ga!==gb) return ga-gb;
+    return a.order - b.order;
+  });
+}
+
+function loadPivot() {
+  const year = parseInt(yearSel.value);
+  const cats = getActiveCats();
+  const recs = loadFinanceRecords().filter(r=>r.year===year);
+  pivotData = cats.map(cat => {
+    const row = { Category: cat.category };
+    MONTHS.forEach((m,i) => {
+      const rec = recs.find(r=>r.category===cat.category&&r.month===i+1);
+      row[m] = rec ? rec.amount : 0;
+    });
+    return row;
+  });
+}
+
+// ── Render pivot ──────────────────────────────────────────
+function renderPivot() {
+  const cats = getActiveCats();
+  const table = document.getElementById('pivotTable');
+  const groups = [...new Set(cats.map(c=>c.group))];
+
+  let html = '<thead><tr><th>Category</th>';
+  MONTHS.forEach(m=>{ html+=`<th>${m}</th>`; });
+  html += '<th>YTD</th></tr></thead><tbody>';
+
+  if(currentSection==='outgoing') {
+    const GO = {Living:1,Insurance:2,Taxes:3,Investments:4};
+    const sortedGroups = [...new Set(cats.map(c=>c.group))].sort((a,b)=>(GO[a]||99)-(GO[b]||99));
+    sortedGroups.forEach(grp => {
+      const grpCats = cats.filter(c=>c.group===grp);
+      html += `<tr class="group-header"><td colspan="${2+MONTHS.length}">${grp}</td></tr>`;
+      grpCats.forEach(cat => { html += buildEditRow(cat.category); });
+    });
+  } else {
+    cats.forEach(cat => { html += buildEditRow(cat.category); });
+  }
+
+  html += '</tbody>';
+  table.innerHTML = html;
+  renderTotals();
+  renderManageSel();
+  renderCalcCat();
+}
+
+function buildEditRow(catName) {
+  const row = pivotData.find(r=>r.Category===catName) || { Category: catName };
+  let html = `<tr data-cat="${catName}"><td>${catName}</td>`;
+  MONTHS.forEach(m => {
+    const v = row[m] || 0;
+    html += `<td><input type="number" min="0" step="1" value="${v}" data-cat="${catName}" data-month="${m}" onchange="onCellChange(this)" onblur="renderTotals()"></td>`;
+  });
+  const ytd = MONTHS.reduce((s,m)=>s+(parseFloat(row[m])||0),0);
+  html += `<td class="bold mono" id="ytd_${catName.replace(/\W/g,'_')}">${fmt(ytd)}</td></tr>`;
+  return html;
+}
+
+function onCellChange(input) {
+  const cat = input.dataset.cat;
+  const month = input.dataset.month;
+  const val = parseFloat(input.value) || 0;
+  let row = pivotData.find(r=>r.Category===cat);
+  if(!row) { row={Category:cat}; MONTHS.forEach(m=>row[m]=0); pivotData.push(row); }
+  row[month] = val;
+  // Update YTD cell
+  const ytd = MONTHS.reduce((s,m)=>s+(parseFloat(row[m])||0),0);
+  const ytdEl = document.getElementById('ytd_'+cat.replace(/\W/g,'_'));
+  if(ytdEl) ytdEl.textContent = fmt(ytd);
+  renderTotals();
+}
+
+function renderTotals() {
+  const totals = {};
+  MONTHS.forEach(m=>totals[m]=0);
+  pivotData.forEach(row => {
+    MONTHS.forEach(m=>{ totals[m]+=(parseFloat(row[m])||0); });
+  });
+  const ytd = MONTHS.reduce((s,m)=>s+totals[m],0);
+
+  const table = document.getElementById('totalsTable');
+  let html = '<thead><tr><th>Metric</th>';
+  MONTHS.forEach(m=>{ html+=`<th>${m}</th>`; });
+  html += '<th>YTD</th></tr></thead>';
+  html += '<tbody><tr class="total-row"><td>TOTAL</td>';
+  MONTHS.forEach(m=>{ html+=`<td>${fmt(totals[m])}</td>`; });
+  html += `<td class="bold">${fmt(ytd)}</td></tr></tbody>`;
+  table.innerHTML = html;
+}
+
+function renderManageSel() {
+  const sel = document.getElementById('manageCatSel');
+  const cats = getActiveCats();
+  sel.innerHTML = cats.map(c=>`<option value="${c.category}">${c.category}</option>`).join('');
+}
+
+function renderCalcCat() {
+  const sel = document.getElementById('calcCat');
+  const cats = getActiveCats();
+  sel.innerHTML = cats.map(c=>`<option value="${c.category}">${c.category}</option>`).join('');
+}
+
+// ── Historical pivot ──────────────────────────────────────
+function renderHistTable() {
+  const cats = getActiveCats();
+  const recs = loadFinanceRecords();
+  const years = [...new Set(recs.map(r=>r.year))].sort();
+  if(!years.length) { document.getElementById('histTable').innerHTML='<tr><td class="text-muted">No historical data yet.</td></tr>'; return; }
+
+  let html = '<thead><tr><th>Category</th>';
+  years.forEach(y=>{ html+=`<th>${y}</th>`; });
+  html += '</tr></thead><tbody>';
+
+  cats.forEach(cat => {
+    html += `<tr><td>${cat.category}</td>`;
+    years.forEach(y => {
+      const total = recs.filter(r=>r.year===y&&r.category===cat.category).reduce((s,r)=>s+r.amount,0);
+      html += `<td>${fmt(total)}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody>';
+  document.getElementById('histTable').innerHTML = html;
+}
+
+// ── Discretionary ─────────────────────────────────────────
+function renderDisc() {
+  const year = parseInt(yearSel.value);
+  const ue = loadUselessExpenses().filter(e=>e.year===year);
+  document.getElementById('ueYear').textContent = year;
+
+  const monthly = Array(12).fill(0);
+  ue.forEach(e=>{ if(e.month>=1&&e.month<=12) monthly[e.month-1]+=e.amount_sgd; });
+
+  let html = '<thead><tr><th>Metric</th>';
+  MONTHS.forEach(m=>{ html+=`<th>${m}</th>`; });
+  html+='<th>YTD</th></tr></thead><tbody><tr><td>Discretionary Spend</td>';
+  monthly.forEach(v=>{ html+=`<td class="${v>0?'neg':''}">${fmt(v)}</td>`; });
+  html+=`<td class="neg bold">${fmt(monthly.reduce((a,b)=>a+b,0))}</td></tr></tbody>`;
+  document.getElementById('ueTable').innerHTML = html;
+
+  const entries = [...ue].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  let ehtml = '<thead><tr><th>Date</th><th>Amount (SGD)</th><th style="text-align:left">Note</th><th></th></tr></thead><tbody>';
+  entries.forEach(e=>{
+    ehtml += `<tr>
+      <td>${e.date||''}</td>
+      <td class="neg">${Number(e.amount_sgd||0).toFixed(2)}</td>
+      <td style="text-align:left">${e.note||''}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteUE('${e.entry_id}')">🗑</button></td>
+    </tr>`;
+  });
+  if(!entries.length) ehtml += '<tr><td colspan="4" class="text-muted" style="text-align:center;padding:20px">No entries yet</td></tr>';
+  ehtml += '</tbody>';
+  document.getElementById('ueEntriesTable').innerHTML = ehtml;
+}
+
+function addUselessExpense() {
+  const dateVal = document.getElementById('ueDate').value;
+  const amount = parseFloat(document.getElementById('ueAmount').value)||0;
+  const note = document.getElementById('ueNote').value.trim();
+  if(amount<=0){ toast('Amount must be > 0','error'); return; }
+  if(!note){ toast('Please add a note','error'); return; }
+  const d = new Date(dateVal);
+  const arr = loadUselessExpenses();
+  arr.push({
+    entry_id: uuid(), date: dateVal,
+    year: d.getFullYear(), month: d.getMonth()+1,
+    amount_sgd: amount, note,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  saveUselessExpenses(arr);
+  document.getElementById('ueAmount').value='';
+  document.getElementById('ueNote').value='';
+  renderDisc();
+  toast('Expense added');
+}
+
+function deleteUE(id) {
+  let arr = loadUselessExpenses().filter(e=>e.entry_id!==id);
+  saveUselessExpenses(arr);
+  renderDisc();
+  toast('Entry deleted');
+}
+
+// ── Save pivot ────────────────────────────────────────────
+function savePivot() {
+  const year = parseInt(yearSel.value);
+  const cats = getActiveCats();
+  const catNames = cats.map(c=>c.category);
+  let records = loadFinanceRecords().filter(r=>!(r.year===year && catNames.includes(r.category)));
+  const now = new Date().toISOString();
+
+  pivotData.forEach(row => {
+    const cat = cats.find(c=>c.category===row.Category);
+    if(!cat) return;
+    MONTHS.forEach((m,i) => {
+      const val = parseFloat(row[m])||0;
+      if(val===0) return;
+      records.push({
+        record_id: uuid(), year, month: i+1,
+        type: cat.type, category: row.Category,
+        amount: val, notes: '',
+        created_at: now, updated_at: now,
+      });
+    });
+  });
+  saveFinanceRecords(records);
+  renderHistTable();
+  toast('Saved successfully ✓');
+}
+
+// ── Category management ───────────────────────────────────
+function addCategory() {
+  const name = document.getElementById('newCatName').value.trim();
+  if(!name){ toast('Name cannot be empty','error'); return; }
+  const cats = loadCategories();
+  const exists = cats.find(c=>c.category.toLowerCase()===name.toLowerCase()&&c.section===currentSection);
+  if(exists){
+    if(!exists.active){ exists.active=true; exists.end_year=null; saveCategories(cats); toast(`Re-activated: ${name}`); renderAll(); return; }
+    toast('Category already exists','error'); return;
+  }
+  const grp = currentSection==='outgoing' ? document.getElementById('newCatGroup').value : 'Primary';
+  const type = currentSection==='outgoing' ? document.getElementById('newCatType').value : 'income';
+  const order = parseInt(document.getElementById('newCatOrder').value)||99;
+  const startYear = parseInt(document.getElementById('newCatYear').value)||currentYear;
+  cats.push({ category_id:uuid(), section:currentSection, group:grp, type, category:name, order, active:true, start_year:startYear, end_year:null, notes:'' });
+  saveCategories(cats);
+  loadPivot();
+  renderAll();
+  document.getElementById('newCatName').value='';
+  toast(`Added: ${name}`);
+}
+
+function hideCategory() {
+  const name = document.getElementById('manageCatSel').value;
+  const cats = loadCategories();
+  const cat = cats.find(c=>c.category===name);
+  if(!cat){ toast('Not found','error'); return; }
+  cat.active=false; cat.end_year=parseInt(yearSel.value);
+  saveCategories(cats);
+  loadPivot(); renderAll();
+  toast(`Retired: ${name}`);
+}
+
+function deleteCategory() {
+  const name = document.getElementById('manageCatSel').value;
+  if(!confirm(`Delete "${name}" and all its records? This cannot be undone.`)) return;
+  let cats = loadCategories().filter(c=>c.category!==name);
+  let recs = loadFinanceRecords().filter(r=>r.category!==name);
+  saveCategories(cats); saveFinanceRecords(recs);
+  loadPivot(); renderAll();
+  toast(`Deleted: ${name}`, 'info');
+}
+
+// ── Calculator helper ─────────────────────────────────────
+function applyCalc() {
+  const catName = document.getElementById('calcCat').value;
+  const month = document.getElementById('calcMonth').value;
+  const rawVals = document.getElementById('calcValues').value;
+  const parts = rawVals.split(',').map(s=>parseFloat(s.trim())).filter(n=>!isNaN(n));
+  if(!parts.length){ toast('Invalid input','error'); return; }
+  const total = parts.reduce((a,b)=>a+b,0);
+
+  let row = pivotData.find(r=>r.Category===catName);
+  if(!row){ row={Category:catName}; MONTHS.forEach(m=>row[m]=0); pivotData.push(row); }
+  row[month] = total;
+
+  // Update input in DOM
+  const input = document.querySelector(`input[data-cat="${catName}"][data-month="${month}"]`);
+  if(input){ input.value=total; }
+  const ytd = MONTHS.reduce((s,m)=>s+(parseFloat(row[m])||0),0);
+  const ytdEl = document.getElementById('ytd_'+catName.replace(/\W/g,'_'));
+  if(ytdEl) ytdEl.textContent = fmt(ytd);
+  renderTotals();
+  toast(`${catName} / ${month} = ${fmt(total)}`);
+}
+
+// ── Export section ────────────────────────────────────────
+function exportSectionExcel() {
+  const year = parseInt(yearSel.value);
+  const cats = getActiveCats();
+  const data = pivotData.map(row => {
+    const out = { Category: row.Category };
+    MONTHS.forEach(m=>{ out[m]=row[m]||0; });
+    out['YTD'] = MONTHS.reduce((s,m)=>s+(row[m]||0),0);
+    return out;
+  });
+  exportToExcel([{ name: `${currentSection}_${year}`, data }]);
+}
+
+// ── Section toggle ────────────────────────────────────────
+function setSection(sec) {
+  currentSection = sec;
+  document.getElementById('btnIncoming').className = sec==='incoming'?'btn btn-primary':'btn btn-secondary';
+  document.getElementById('btnOutgoing').className = sec==='outgoing'?'btn btn-primary':'btn btn-secondary';
+  document.getElementById('groupDiv').style.display = sec==='outgoing'?'':'none';
+  document.getElementById('typeDiv').style.display = sec==='outgoing'?'':'none';
+  document.getElementById('discSection').classList.toggle('hidden', sec!=='outgoing');
+  loadPivot(); renderAll();
+}
+
+function onYearChange() {
+  loadPivot(); renderAll();
+}
+
+function renderAll() {
+  renderPivot();
+  renderHistTable();
+  if(currentSection==='outgoing') renderDisc();
+}
+
+// ── Boot ──────────────────────────────────────────────────
+setSection('incoming');
+</script>
+</body>
+</html>

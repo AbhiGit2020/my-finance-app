@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Finance App — Assets</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/store.js"></script>
+<style>
+.asset-card { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:18px 20px; margin-bottom:18px; }
+.asset-card-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:12px; }
+.asset-card-meta { font-size:0.82rem; color:var(--text-muted); margin-top:3px; }
+.asset-kpi-pair { display:flex; gap:12px; }
+.asset-kpi-sm { background:var(--teal-dim); border:1px solid var(--teal); border-radius:8px; padding:10px 14px; min-width:140px; }
+.asset-kpi-sm-label { font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em; }
+.asset-kpi-sm-value { font-size:1.1rem; font-weight:700; font-family:'IBM Plex Mono',monospace; margin-top:3px; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="index.html">💰 MyFinance</a>
+  <div class="nav-links">
+    <a href="index.html">Dashboard</a>
+    <a href="input.html">Finance Input</a>
+    <a href="investments.html">Investments</a>
+    <a href="stocks.html">Stocks</a>
+    <a href="assets.html" class="active">Assets</a>
+  </div>
+  <div class="nav-actions">
+    <button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Export Excel</button>
+    <button class="btn btn-secondary btn-sm" onclick="exportJsonBackup()">💾 Backup JSON</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-title">🏠 Assets / Net Worth</div>
+
+  <!-- Controls -->
+  <div class="flex flex-gap flex-center mb-16 flex-wrap">
+    <div class="form-group">
+      <label>Year</label>
+      <select id="assetYear" class="input-md" onchange="render()"></select>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:flex-end">
+      <button class="btn btn-secondary" onclick="exportAssetsExcel()">⬇ Export Excel</button>
+    </div>
+  </div>
+
+  <!-- Net Worth KPIs -->
+  <div class="kpi-grid" id="nwKPIs"></div>
+
+  <!-- Add Asset -->
+  <details>
+    <summary>➕ Create Asset</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label>Asset Name</label>
+          <input type="text" id="newAssetName" class="input-lg" placeholder="e.g. HDB Flat, CPF OA, Gold ETF">
+        </div>
+        <div class="form-group">
+          <label>Type</label>
+          <select id="newAssetType" class="input-md">
+            <option>Provident Fund</option><option>Retirement Fund</option><option>Property</option>
+            <option>Gold</option><option>Other Non-Liquid</option><option>Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Owner</label>
+          <select id="newAssetOwner" class="input-md">
+            <option>Abhi</option><option>Wife</option><option>Kid</option><option>Joint</option><option>Other</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:2">
+          <label>Notes</label>
+          <input type="text" id="newAssetNotes" class="input-lg" placeholder="optional">
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="createAsset()">Create</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- Manage Asset -->
+  <details>
+    <summary>🧹 Manage Assets (Retire / Delete)</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group" style="flex:1">
+          <label>Asset</label>
+          <select id="manageAssetSel" class="wide"></select>
+        </div>
+        <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
+          <button class="btn btn-secondary" onclick="retireAsset()">🙈 Retire</button>
+          <button class="btn btn-danger" onclick="deleteAsset()">🗑️ Delete</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <hr class="divider">
+
+  <!-- Net Worth Summary Table -->
+  <div class="card">
+    <div class="card-title">Net Worth Summary — <span id="nwYearLabel"></span></div>
+    <div class="tbl-wrap"><table id="nwTable"></table></div>
+  </div>
+
+  <!-- Asset Boxes -->
+  <div class="section-title mb-16">📦 Asset Valuation Boxes</div>
+  <div id="assetBoxes"></div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ── Init ──────────────────────────────────────────────────
+const yearSel=document.getElementById('assetYear');
+const currentYear=new Date().getFullYear();
+for(let y=2023;y<=2051;y++){const o=document.createElement('option');o.value=y;o.textContent=y;if(y===currentYear)o.selected=true;yearSel.appendChild(o);}
+
+function toast(msg,type='success'){const c=document.getElementById('toastContainer');const d=document.createElement('div');d.className=`toast ${type}`;d.textContent=msg;c.appendChild(d);setTimeout(()=>d.remove(),3500);}
+function fmt(n){return Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0});}
+function fmtFull(n){return Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:2,maximumFractionDigits:2});}
+
+function getYear(){return parseInt(yearSel.value);}
+
+function latestValue(assetId){
+  const vals=loadAssetValues().filter(v=>v.asset_id===assetId);
+  if(!vals.length) return {value:null,date:null};
+  const sorted=[...vals].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const last=sorted[sorted.length-1];
+  return {value:parseFloat(last.value_sgd)||0,date:last.date};
+}
+
+// ── Create/manage assets ──────────────────────────────────
+function createAsset(){
+  const name=document.getElementById('newAssetName').value.trim();
+  if(!name){toast('Name required','error');return;}
+  const arr=loadAssetsMaster();
+  if(arr.find(a=>a.asset_name.toLowerCase()===name.toLowerCase())){toast('Already exists','error');return;}
+  const now=new Date().toISOString();
+  arr.push({asset_id:uuid(),asset_name:name,asset_type:document.getElementById('newAssetType').value,
+    owner:document.getElementById('newAssetOwner').value,active:true,
+    notes:document.getElementById('newAssetNotes').value.trim(),created_at:now,updated_at:now});
+  saveAssetsMaster(arr);
+  document.getElementById('newAssetName').value='';
+  document.getElementById('newAssetNotes').value='';
+  render(); toast(`Asset created: ${name}`);
+}
+
+function retireAsset(){
+  const name=document.getElementById('manageAssetSel').value;
+  const arr=loadAssetsMaster();
+  const a=arr.find(x=>x.asset_name===name);
+  if(!a){toast('Not found','error');return;}
+  a.active=false; a.updated_at=new Date().toISOString();
+  saveAssetsMaster(arr); render(); toast(`Retired: ${name}`);
+}
+
+function deleteAsset(){
+  const name=document.getElementById('manageAssetSel').value;
+  if(!confirm(`Delete "${name}" and all its valuations?`)) return;
+  const arr=loadAssetsMaster();
+  const a=arr.find(x=>x.asset_name===name);
+  if(!a){toast('Not found','error');return;}
+  saveAssetsMaster(arr.filter(x=>x.asset_name!==name));
+  saveAssetValues(loadAssetValues().filter(v=>v.asset_id!==a.asset_id));
+  render(); toast(`Deleted: ${name}`,'info');
+}
+
+// ── Add valuation ─────────────────────────────────────────
+function addValuation(assetId,assetName){
+  const dateEl=document.getElementById(`vd_${assetId}`);
+  const amtEl=document.getElementById(`va_${assetId}`);
+  const noteEl=document.getElementById(`vn_${assetId}`);
+  const date=dateEl.value; const amt=parseFloat(amtEl.value)||0; const note=noteEl.value.trim();
+  if(!date){toast('Date required','error');return;}
+  if(amt<=0){toast('Value must be > 0','error');return;}
+  const d=new Date(date);
+  const now=new Date().toISOString();
+  const vals=loadAssetValues();
+  vals.push({valuation_id:uuid(),asset_id:assetId,date,year:d.getFullYear(),month:d.getMonth()+1,
+    value_sgd:amt,note,created_at:now,updated_at:now});
+  saveAssetValues(vals);
+  amtEl.value=''; noteEl.value='';
+  render(); toast(`Valuation added for ${assetName}`);
+}
+
+function deleteValuation(valId){
+  saveAssetValues(loadAssetValues().filter(v=>v.valuation_id!==valId));
+  render(); toast('Entry deleted');
+}
+
+function editValuationInline(valId){
+  const vals=loadAssetValues();
+  const idx=vals.findIndex(v=>v.valuation_id===valId);
+  if(idx<0) return;
+  const dateEl=document.getElementById(`ed_${valId}`);
+  const amtEl=document.getElementById(`ea_${valId}`);
+  const noteEl=document.getElementById(`en_${valId}`);
+  if(!dateEl||!amtEl) return;
+  const date=dateEl.value; const amt=parseFloat(amtEl.value)||0; const note=noteEl?noteEl.value.trim():'';
+  if(!date||amt<=0){toast('Invalid values','error');return;}
+  const d=new Date(date);
+  vals[idx]={...vals[idx],date,year:d.getFullYear(),month:d.getMonth()+1,value_sgd:amt,note,updated_at:new Date().toISOString()};
+  saveAssetValues(vals);
+  render(); toast('Valuation updated');
+}
+
+// ── Render ────────────────────────────────────────────────
+function render(){
+  const year=getYear();
+  const assets=loadAssetsMaster();
+  const allVals=loadAssetValues();
+
+  // Manage select
+  const active=assets.filter(a=>a.active);
+  document.getElementById('manageAssetSel').innerHTML=assets.map(a=>`<option>${a.asset_name}</option>`).join('');
+
+  // Net Worth KPIs
+  const totalLatest=active.reduce((s,a)=>{const{value}=latestValue(a.asset_id);return s+(value||0);},0);
+  const TYPES=[...new Set(active.map(a=>a.asset_type))];
+  let kpiHTML=`<div class="kpi teal"><div class="kpi-label">Total Net Worth (Latest)</div><div class="kpi-value neutral">S$ ${fmt(totalLatest)}</div></div>`;
+  TYPES.forEach(type=>{
+    const typeAssets=active.filter(a=>a.asset_type===type);
+    const typeTotal=typeAssets.reduce((s,a)=>{const{value}=latestValue(a.asset_id);return s+(value||0);},0);
+    const pct=totalLatest>0?((typeTotal/totalLatest)*100).toFixed(0):0;
+    kpiHTML+=`<div class="kpi"><div class="kpi-label">${type}</div><div class="kpi-value neutral">S$ ${fmt(typeTotal)}</div><div class="text-muted mt-4" style="font-size:0.78rem">${pct}% of total</div></div>`;
+  });
+  document.getElementById('nwKPIs').innerHTML=kpiHTML;
+
+  // Net Worth Summary Table (monthly by type for selected year)
+  document.getElementById('nwYearLabel').textContent=year;
+  const nwTable=document.getElementById('nwTable');
+  const monthLabels=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let thtml='<thead><tr><th>Asset</th><th>Type</th><th>Owner</th>';
+  monthLabels.forEach(m=>thtml+=`<th>${m}</th>`);
+  thtml+='<th>Latest</th></tr></thead><tbody>';
+
+  active.sort((a,b)=>{
+    const typeOrder={'Provident Fund':1,'Retirement Fund':2,'Property':3,'Gold':4,'Other Non-Liquid':5,'Other':6};
+    return (typeOrder[a.asset_type]||9)-(typeOrder[b.asset_type]||9)||(a.asset_name>b.asset_name?1:-1);
+  }).forEach(asset=>{
+    const yearVals=allVals.filter(v=>v.asset_id===asset.asset_id&&v.year===year);
+    const monthly=monthLabels.map((_,i)=>{
+      const monthVals=yearVals.filter(v=>v.month===i+1);
+      if(!monthVals.length) return null;
+      return Math.max(...monthVals.map(v=>parseFloat(v.value_sgd)||0));
+    });
+    const {value:latestVal}=latestValue(asset.asset_id);
+    thtml+=`<tr><td class="bold">${asset.asset_name}</td><td class="text-muted">${asset.asset_type}</td><td class="text-muted">${asset.owner}</td>`;
+    monthly.forEach(v=>thtml+=`<td class="${v?'':'text-muted'}">${v!==null?fmt(v):'—'}</td>`);
+    thtml+=`<td class="bold">${latestVal!==null?fmt(latestVal):'—'}</td></tr>`;
+  });
+
+  // Total row
+  thtml+='<tr class="total-row"><td colspan="3">TOTAL NET WORTH</td>';
+  monthLabels.forEach((_,i)=>{
+    const monthTotal=active.reduce((s,asset)=>{
+      const yearVals=allVals.filter(v=>v.asset_id===asset.asset_id&&v.year===year&&v.month===i+1);
+      if(!yearVals.length) return s;
+      return s+Math.max(...yearVals.map(v=>parseFloat(v.value_sgd)||0));
+    },0);
+    thtml+=`<td class="bold">${monthTotal>0?fmt(monthTotal):'—'}</td>`;
+  });
+  thtml+=`<td class="bold">${fmt(totalLatest)}</td></tr>`;
+  thtml+='</tbody>';
+  nwTable.innerHTML=thtml;
+
+  // Asset boxes
+  const boxesEl=document.getElementById('assetBoxes');
+  if(!active.length){boxesEl.innerHTML='<p class="text-muted">No active assets. Create one above.</p>';return;}
+  let boxHTML='';
+  active.forEach(asset=>{
+    const{value:latestVal,date:latestDate}=latestValue(asset.asset_id);
+    const yearVals=allVals.filter(v=>v.asset_id===asset.asset_id&&v.year===year).sort((a,b)=>new Date(b.date)-new Date(a.date));
+    const monthly=monthLabels.map((_,i)=>{
+      const mv=yearVals.filter(v=>v.month===i+1);
+      if(!mv.length) return 0;
+      return mv[mv.length-1].value_sgd;
+    });
+
+    boxHTML+=`<div class="asset-card">
+      <div class="asset-card-header">
+        <div>
+          <div class="bold" style="font-size:1.05rem">${asset.asset_name}</div>
+          <div class="asset-card-meta">${asset.asset_type} | ${asset.owner}${asset.notes?` — ${asset.notes}`:''}</div>
+        </div>
+        <div class="asset-kpi-pair">
+          <div class="asset-kpi-sm"><div class="asset-kpi-sm-label">Latest Value (SGD)</div><div class="asset-kpi-sm-value">${latestVal!==null?fmt(latestVal):'—'}</div></div>
+          <div class="asset-kpi-sm"><div class="asset-kpi-sm-label">Last Updated</div><div class="asset-kpi-sm-value" style="font-size:0.9rem">${latestDate||'—'}</div></div>
+        </div>
+      </div>
+
+      <!-- Add valuation form -->
+      <div class="panel mb-8">
+        <div class="bold mb-8" style="font-size:0.88rem">Add Valuation</div>
+        <div class="form-row">
+          <div class="form-group"><label>Date</label><input type="date" id="vd_${asset.asset_id}" class="input-md" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div class="form-group"><label>Value (SGD)</label><input type="number" id="va_${asset.asset_id}" class="input-md" min="0" step="100" value="0"></div>
+          <div class="form-group" style="flex:2"><label>Note</label><input type="text" id="vn_${asset.asset_id}" class="input-lg" placeholder="e.g. annual statement, bank balance"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addValuation('${asset.asset_id}','${asset.asset_name}')">Add</button></div>
+        </div>
+      </div>
+
+      <!-- Monthly summary row -->
+      <div style="overflow-x:auto;margin-bottom:10px">
+        <table style="width:100%;font-size:0.82rem;border-collapse:collapse">
+          <thead><tr>${monthLabels.map(m=>`<th style="text-align:right;padding:5px 8px;color:var(--text-muted);font-size:0.75rem">${m}</th>`).join('')}</tr></thead>
+          <tbody><tr>${monthly.map(v=>`<td style="text-align:right;padding:5px 8px;font-family:'IBM Plex Mono',monospace">${v?fmt(v):'—'}</td>`).join('')}</tr></tbody>
+        </table>
+      </div>
+
+      <!-- History -->
+      ${yearVals.length?`
+      <details>
+        <summary>Valuation history for ${year} (${yearVals.length} entries)</summary>
+        <div class="details-content">
+          <table style="width:100%;font-size:0.83rem;border-collapse:collapse">
+            <thead><tr><th style="text-align:left;padding:6px 10px">Date</th><th style="padding:6px 10px">Value (SGD)</th><th style="text-align:left;padding:6px 10px">Note</th><th style="padding:6px 10px">Edit</th><th style="padding:6px 10px">Del</th></tr></thead>
+            <tbody>${yearVals.map(v=>`
+              <tr id="row_${v.valuation_id}">
+                <td style="padding:5px 10px"><input type="date" id="ed_${v.valuation_id}" value="${v.date}" class="input-sm" style="width:130px"></td>
+                <td style="padding:5px 10px"><input type="number" id="ea_${v.valuation_id}" value="${v.value_sgd}" min="0" step="100" class="input-sm" style="width:110px;text-align:right"></td>
+                <td style="padding:5px 10px"><input type="text" id="en_${v.valuation_id}" value="${v.note||''}" class="input-md" style="width:200px"></td>
+                <td style="padding:5px 8px"><button class="btn btn-secondary btn-sm" onclick="editValuationInline('${v.valuation_id}')">Save</button></td>
+                <td style="padding:5px 8px"><button class="btn btn-danger btn-sm" onclick="deleteValuation('${v.valuation_id}')">🗑</button></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </details>`:''}
+    </div>`;
+  });
+  boxesEl.innerHTML=boxHTML;
+}
+
+// ── Export ────────────────────────────────────────────────
+function exportAssetsExcel(){
+  exportToExcel([
+    {name:'assets_master',data:loadAssetsMaster()},
+    {name:'asset_values',data:loadAssetValues()},
+  ]);
+}
+
+render();
+</script>
+</body>
+</html>

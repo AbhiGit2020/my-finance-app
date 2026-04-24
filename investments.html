@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Finance App — Investments</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/store.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="index.html">💰 MyFinance</a>
+  <div class="nav-links">
+    <a href="index.html">Dashboard</a>
+    <a href="input.html">Finance Input</a>
+    <a href="investments.html" class="active">Investments</a>
+    <a href="stocks.html">Stocks</a>
+    <a href="assets.html">Assets</a>
+  </div>
+  <div class="nav-actions">
+    <button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Export Excel</button>
+    <button class="btn btn-secondary btn-sm" onclick="exportJsonBackup()">💾 Backup JSON</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-title">📈 Investments</div>
+
+  <!-- Controls -->
+  <div class="flex flex-gap flex-center mb-16 flex-wrap">
+    <div class="form-group">
+      <label>Year</label>
+      <select id="invYear" class="input-md" onchange="render()"></select>
+    </div>
+    <div class="form-group">
+      <label>Focus Investment</label>
+      <select id="focusInv" class="input-md" onchange="renderTable()">
+        <option value="All">All</option>
+      </select>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:flex-end">
+      <button class="btn btn-primary" onclick="saveInvestments()">💾 Save</button>
+      <button class="btn btn-secondary" onclick="exportInvExcel()">⬇ Export Excel</button>
+    </div>
+  </div>
+
+  <!-- Add investment -->
+  <details>
+    <summary>➕ Add New Investment</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group" style="flex:3">
+          <label>Investment Name</label>
+          <input type="text" id="newInvName" class="input-lg" placeholder="e.g. India Equity Fund">
+        </div>
+        <div class="form-group">
+          <label>Type</label>
+          <select id="newInvType" class="input-md">
+            <option>Equities</option><option>ETFs</option><option>Mutual Funds</option>
+            <option>Equity Portfolios</option><option>Unit Trusts</option>
+            <option>Real Estate</option><option>Cryptos</option><option>Other</option>
+          </select>
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="addInvestment()">Add</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- Manage investments -->
+  <details>
+    <summary>🧹 Manage Investments (Retire / Delete)</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group" style="flex:1">
+          <label>Investment</label>
+          <select id="manageInvSel" class="wide"></select>
+        </div>
+        <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
+          <button class="btn btn-secondary" onclick="retireInvestment()">🙈 Retire</button>
+          <button class="btn btn-danger" onclick="deleteInvestment()">🗑️ Delete</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- FX Helper -->
+  <details>
+    <summary>💱 FX Currency Converter (apply to cell)</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group"><label>Investment</label><select id="fxInv" class="input-md"></select></div>
+        <div class="form-group"><label>Metric</label>
+          <select id="fxMetric" class="input-md">
+            <option>Monthly Investment</option><option>Market Value</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Month</label><select id="fxMonth" class="input-md"></select></div>
+        <div class="form-group"><label>Amount</label><input type="number" id="fxAmount" class="input-md" value="0" step="100"></div>
+        <div class="form-group"><label>From</label>
+          <select id="fxFrom" class="input-sm"><option>USD</option><option>SGD</option><option>INR</option></select>
+        </div>
+        <div class="form-group"><label>To</label>
+          <select id="fxTo" class="input-sm"><option>SGD</option><option>USD</option><option>INR</option></select>
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="applyFX()">Apply → Cell</button>
+        </div>
+      </div>
+      <p id="fxResult" class="text-muted" style="font-size:0.83rem;margin-top:4px"></p>
+    </div>
+  </details>
+
+  <hr class="divider">
+
+  <!-- Main edit table -->
+  <div class="section-header">
+    <div class="section-title">Investments – Monthly Input</div>
+    <p class="text-muted" style="font-size:0.82rem">Edit Monthly Investment and Market Value rows. Cumulative is auto-calculated.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table class="edit-table" id="invTable"></table>
+  </div>
+
+  <!-- Summary -->
+  <div class="card mt-16">
+    <div class="card-title">📊 Portfolio Summary (SGD)</div>
+    <div class="tbl-wrap"><table id="summaryTable"></table></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ── FX Rates ─────────────────────────────────────────────
+const FX = {
+  'USD-SGD':1.35, 'SGD-USD':0.741, 'USD-INR':84.0, 'INR-USD':0.0119,
+  'SGD-INR':62.2, 'INR-SGD':0.0161,
+};
+
+// ── State ─────────────────────────────────────────────────
+let tableData = []; // flat rows: {invName, metric, Jan..Dec, status, invType}
+
+// ── Init ──────────────────────────────────────────────────
+const yearSel = document.getElementById('invYear');
+const currentYear = new Date().getFullYear();
+for(let y=2023;y<=2050;y++){
+  const o=document.createElement('option');
+  o.value=y;o.textContent=y;
+  if(y===currentYear)o.selected=true;
+  yearSel.appendChild(o);
+}
+MONTHS.forEach(m=>{
+  const o=document.createElement('option');
+  o.value=m;o.textContent=m;
+  document.getElementById('fxMonth').appendChild(o);
+});
+
+function toast(msg,type='success'){
+  const c=document.getElementById('toastContainer');
+  const d=document.createElement('div');
+  d.className=`toast ${type}`;d.textContent=msg;
+  c.appendChild(d);setTimeout(()=>d.remove(),3500);
+}
+
+function fmt(n){ return Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+
+// ── Investment categories ─────────────────────────────────
+function getInvCats(year){
+  return loadCategories().filter(c=>
+    c.section==='investments'&&
+    c.start_year<=year&&
+    (c.end_year===null||c.end_year===undefined||c.end_year>=year)
+  ).sort((a,b)=>a.order-b.order);
+}
+
+function computeCumulative(mVals){
+  let running=0; const out={};
+  MONTHS.forEach(m=>{ running+=parseFloat(mVals[m])||0; out[m]=running; });
+  return out;
+}
+
+// ── Load table data from stored investment data ───────────
+function loadTableData(){
+  const year=parseInt(yearSel.value);
+  const cats=getInvCats(year);
+  const stored=loadInvestmentData().filter(r=>r.year===year);
+  const BANDS=['🔵','🟢','🟡','🟣','🟠'];
+  tableData=[];
+  cats.forEach((cat,i)=>{
+    const band=BANDS[i%BANDS.length];
+    const status=cat.active?'Active':'Inactive';
+
+    // Monthly Investment
+    const miRow={invName:cat.category,metric:'Monthly Investment',band,status,invType:cat.type};
+    MONTHS.forEach(m=>{ const r=stored.find(s=>s.category===cat.category&&s.metric==='monthly_investment'&&s.month===MONTHS.indexOf(m)+1); miRow[m]=r?r.amount:0; });
+    tableData.push(miRow);
+
+    // Cumulative (auto)
+    const cum=computeCumulative(miRow);
+    tableData.push({invName:cat.category,metric:'Cumulative Investment',band,status,invType:cat.type,...cum});
+
+    // Market Value
+    const mvRow={invName:cat.category,metric:'Market Value',band,status,invType:cat.type};
+    MONTHS.forEach(m=>{ const r=stored.find(s=>s.category===cat.category&&s.metric==='market_value'&&s.month===MONTHS.indexOf(m)+1); mvRow[m]=r?r.amount:0; });
+    tableData.push(mvRow);
+  });
+}
+
+// ── Render table ──────────────────────────────────────────
+function renderTable(){
+  const focus=document.getElementById('focusInv').value;
+  const rows=focus==='All'?tableData:tableData.filter(r=>r.invName===focus);
+
+  let html='<thead><tr><th></th><th style="text-align:left">Investment</th><th style="text-align:left">Type</th><th style="text-align:left">Metric</th>';
+  MONTHS.forEach(m=>html+=`<th>${m}</th>`);
+  html+='<th>YTD</th></tr></thead><tbody>';
+
+  let lastInv='';
+  rows.forEach((row,idx)=>{
+    const isCum=row.metric==='Cumulative Investment';
+    const isMI=row.metric==='Monthly Investment';
+    const isMV=row.metric==='Market Value';
+    const editable=isMI||isMV;
+    const rowId=`inv_${idx}`;
+
+    if(row.invName!==lastInv){
+      if(lastInv!=='') html+='<tr style="height:6px"><td colspan="100"></td></tr>';
+      lastInv=row.invName;
+    }
+
+    html+=`<tr data-id="${rowId}" data-inv="${row.invName}" data-metric="${row.metric}" class="${row.status==='Inactive'?'text-muted':''}">`;
+    html+=`<td>${row.band}</td>`;
+    html+=`<td style="text-align:left;font-weight:600">${isMI?row.invName:''}</td>`;
+    html+=`<td style="text-align:left;font-size:0.78rem;color:var(--text-muted)">${isMI?row.invType:''}</td>`;
+    html+=`<td style="text-align:left;font-size:0.82rem;color:${isCum?'var(--text-muted)':'inherit'}">${row.metric}</td>`;
+
+    MONTHS.forEach(m=>{
+      const v=row[m]||0;
+      if(editable&&row.status!=='Inactive'){
+        html+=`<td><input type="number" min="0" step="1" value="${v}" data-inv="${row.invName}" data-metric="${row.metric}" data-month="${m}" onchange="onInvCellChange(this)" onblur="renderSummary()"></td>`;
+      } else {
+        html+=`<td class="mono" style="color:var(--text-muted);font-size:0.82rem">${fmt(v)}</td>`;
+      }
+    });
+
+    const ytd=MONTHS.reduce((s,m2)=>s+(parseFloat(row[m2])||0),0);
+    html+=`<td class="bold mono" id="ytd_inv_${rowId}">${fmt(ytd)}</td>`;
+    html+='</tr>';
+  });
+  html+='</tbody>';
+  document.getElementById('invTable').innerHTML=html;
+  renderSummary();
+}
+
+function onInvCellChange(input){
+  const inv=input.dataset.inv; const metric=input.dataset.metric; const month=input.dataset.month;
+  const val=parseFloat(input.value)||0;
+
+  // Update tableData
+  const row=tableData.find(r=>r.invName===inv&&r.metric===metric);
+  if(row){ row[month]=val; }
+
+  // If Monthly Investment changed, recalc cumulative
+  if(metric==='Monthly Investment'){
+    const miRow=tableData.find(r=>r.invName===inv&&r.metric==='Monthly Investment');
+    if(miRow){
+      const cum=computeCumulative(miRow);
+      const cumRow=tableData.find(r=>r.invName===inv&&r.metric==='Cumulative Investment');
+      if(cumRow){ Object.assign(cumRow,cum); }
+      // Update cumulative cells in DOM
+      const cumInputs=document.querySelectorAll(`[data-inv="${inv}"][data-metric="Cumulative Investment"]`);
+      cumInputs.forEach(el=>{ if(el.tagName==='TD') el.textContent=fmt(cum[el.dataset.month]); });
+      // find cumulative row's tds
+      const rows=[...document.querySelectorAll(`tr[data-inv="${inv}"]`)];
+      const cumTr=rows.find(r=>r.dataset.metric==='Cumulative Investment');
+      if(cumTr){
+        [...cumTr.querySelectorAll('td.mono')].forEach((td,i)=>{ if(i<12) td.textContent=fmt(cum[MONTHS[i]]); });
+      }
+    }
+  }
+
+  renderSummary();
+}
+
+// ── Portfolio Summary ─────────────────────────────────────
+function renderSummary(){
+  const active=tableData.filter(r=>r.status==='Active');
+  const mi=active.filter(r=>r.metric==='Monthly Investment');
+  const ci=active.filter(r=>r.metric==='Cumulative Investment');
+  const mv=active.filter(r=>r.metric==='Market Value');
+
+  const sumMonth=(rows,m)=>rows.reduce((s,r)=>s+(parseFloat(r[m])||0),0);
+
+  let html='<thead><tr><th>Metric</th>';
+  MONTHS.forEach(m=>html+=`<th>${m}</th>`);
+  html+='<th>Dec/Latest</th></tr></thead><tbody>';
+
+  const metrics=[
+    {label:'Total Monthly Investment',rows:mi,fn:v=>fmt(v)},
+    {label:'Total Cumulative Investment',rows:ci,fn:v=>fmt(v)},
+    {label:'Total Market Value',rows:mv,fn:v=>fmt(v)},
+  ];
+  metrics.forEach(({label,rows,fn})=>{
+    html+=`<tr><td>${label}</td>`;
+    MONTHS.forEach(m=>html+=`<td>${fn(sumMonth(rows,m))}</td>`);
+    html+=`<td class="bold">${fn(sumMonth(rows,'Dec'))}</td></tr>`;
+  });
+
+  // G/L %
+  html+='<tr class="total-row"><td>Gain / Loss %</td>';
+  MONTHS.forEach(m=>{
+    const inv=sumMonth(ci,m); const mkt=sumMonth(mv,m);
+    const pct=inv!==0?(mkt-inv)/inv*100:0;
+    html+=`<td class="${pct>0?'pos':pct<0?'neg':''}">${pct.toFixed(1)}%</td>`;
+  });
+  const invDec=sumMonth(ci,'Dec'); const mktDec=sumMonth(mv,'Dec');
+  const pctDec=invDec!==0?(mktDec-invDec)/invDec*100:0;
+  html+=`<td class="${pctDec>0?'pos':pctDec<0?'neg':''} bold">${pctDec.toFixed(1)}%</td></tr>`;
+
+  html+='</tbody>';
+  document.getElementById('summaryTable').innerHTML=html;
+}
+
+// ── Save ──────────────────────────────────────────────────
+function saveInvestments(){
+  const year=parseInt(yearSel.value);
+  let stored=loadInvestmentData().filter(r=>r.year!==year);
+  const now=new Date().toISOString();
+  const METRIC_CODE={'Monthly Investment':'monthly_investment','Market Value':'market_value'};
+
+  tableData.forEach(row=>{
+    if(row.status==='Inactive') return;
+    if(!METRIC_CODE[row.metric]) return;
+    MONTHS.forEach((m,i)=>{
+      const val=parseFloat(row[m])||0;
+      if(val===0) return;
+      stored.push({
+        record_id:uuid(), year, month:i+1,
+        category:row.invName, metric:METRIC_CODE[row.metric],
+        type:'investment', amount:val,
+        created_at:now, updated_at:now,
+      });
+    });
+  });
+  saveInvestmentData(stored);
+  toast('Investments saved ✓');
+}
+
+// ── Add / Manage investments ──────────────────────────────
+function renderFocusAndManage(){
+  const year=parseInt(yearSel.value);
+  const cats=getInvCats(year);
+  const names=cats.map(c=>c.category);
+
+  const focSel=document.getElementById('focusInv');
+  focSel.innerHTML='<option value="All">All</option>'+names.map(n=>`<option>${n}</option>`).join('');
+
+  document.getElementById('manageInvSel').innerHTML=names.map(n=>`<option>${n}</option>`).join('');
+  document.getElementById('fxInv').innerHTML=names.map(n=>`<option>${n}</option>`).join('');
+}
+
+function addInvestment(){
+  const name=document.getElementById('newInvName').value.trim();
+  if(!name){toast('Name cannot be empty','error');return;}
+  const year=parseInt(yearSel.value);
+  const cats=loadCategories();
+  if(cats.find(c=>c.category.toLowerCase()===name.toLowerCase()&&c.section==='investments')){
+    toast('Already exists','error');return;
+  }
+  const maxOrder=cats.filter(c=>c.section==='investments').reduce((m,c)=>Math.max(m,c.order),0);
+  cats.push({category_id:uuid(),section:'investments',group:'Investments',
+    type:document.getElementById('newInvType').value,category:name,
+    order:maxOrder+1,active:true,start_year:year,end_year:null,notes:''});
+  saveCategories(cats);
+  document.getElementById('newInvName').value='';
+  render(); toast(`Added: ${name}`);
+}
+
+function retireInvestment(){
+  const name=document.getElementById('manageInvSel').value;
+  const cats=loadCategories();
+  const cat=cats.find(c=>c.category===name);
+  if(!cat){toast('Not found','error');return;}
+  cat.active=false; cat.end_year=parseInt(yearSel.value);
+  saveCategories(cats); render(); toast(`Retired: ${name}`);
+}
+
+function deleteInvestment(){
+  const name=document.getElementById('manageInvSel').value;
+  if(!confirm(`Delete "${name}"?`)) return;
+  let cats=loadCategories().filter(c=>c.category!==name);
+  let inv=loadInvestmentData().filter(r=>r.category!==name);
+  saveCategories(cats); saveInvestmentData(inv);
+  render(); toast(`Deleted: ${name}`,'info');
+}
+
+// ── FX Apply ──────────────────────────────────────────────
+function applyFX(){
+  const inv=document.getElementById('fxInv').value;
+  const metric=document.getElementById('fxMetric').value;
+  const month=document.getElementById('fxMonth').value;
+  const amount=parseFloat(document.getElementById('fxAmount').value)||0;
+  const from=document.getElementById('fxFrom').value;
+  const to=document.getElementById('fxTo').value;
+  const rate=FX[`${from}-${to}`];
+  if(!rate){toast('FX pair not supported','error');return;}
+  const converted=Math.round(amount*rate*100)/100;
+  const row=tableData.find(r=>r.invName===inv&&r.metric===metric);
+  if(row){ row[month]=converted; }
+  const input=document.querySelector(`input[data-inv="${inv}"][data-metric="${metric}"][data-month="${month}"]`);
+  if(input){ input.value=converted; onInvCellChange(input); }
+  document.getElementById('fxResult').textContent=`${amount} ${from} → ${converted} ${to} applied to ${inv} (${metric}, ${month})`;
+}
+
+// ── Export ────────────────────────────────────────────────
+function exportInvExcel(){
+  const year=parseInt(yearSel.value);
+  const data=tableData.map(row=>{
+    const out={Investment:row.invName,Type:row.invType,Metric:row.metric,Status:row.status};
+    MONTHS.forEach(m=>out[m]=row[m]||0);
+    out['YTD']=MONTHS.reduce((s,m)=>s+(row[m]||0),0);
+    return out;
+  });
+  exportToExcel([{name:`Investments_${year}`,data}]);
+}
+
+// ── Main render ───────────────────────────────────────────
+function render(){
+  loadTableData();
+  renderFocusAndManage();
+  renderTable();
+}
+
+render();
+</script>
+</body>
+</html>
