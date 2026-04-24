@@ -25,6 +25,34 @@ let _fileId       = null;
 let _initialized  = false;
 let _signedIn     = false;
 
+// ── Session token persistence ─────────────────────────────
+const SS_TOKEN  = 'hf_gtoken';
+const SS_EXPIRY = 'hf_gtoken_exp';
+const SS_FOLDER = 'hf_gfolder';
+const SS_FILE   = 'hf_gfile';
+
+function saveTokenToSession(token, expiresIn = 3600) {
+  const expiry = Date.now() + (expiresIn - 60) * 1000; // 1 min buffer
+  sessionStorage.setItem(SS_TOKEN,  token);
+  sessionStorage.setItem(SS_EXPIRY, expiry.toString());
+}
+
+function loadTokenFromSession() {
+  const token  = sessionStorage.getItem(SS_TOKEN);
+  const expiry = parseInt(sessionStorage.getItem(SS_EXPIRY) || '0');
+  if (token && Date.now() < expiry) return token;
+  sessionStorage.removeItem(SS_TOKEN);
+  sessionStorage.removeItem(SS_EXPIRY);
+  return null;
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SS_TOKEN);
+  sessionStorage.removeItem(SS_EXPIRY);
+  sessionStorage.removeItem(SS_FOLDER);
+  sessionStorage.removeItem(SS_FILE);
+}
+
 // ── Google Identity Services ──────────────────────────────
 function initGoogleAuth() {
   return new Promise((resolve) => {
@@ -35,13 +63,26 @@ function initGoogleAuth() {
         if (response.error) { console.error('Auth error:', response.error); resolve(false); return; }
         _accessToken = response.access_token;
         _signedIn = true;
+        saveTokenToSession(_accessToken, response.expires_in || 3600);
         updateAuthUI(true);
         await loadFromDrive();
         resolve(true);
       },
     });
     window._gisClient = client;
-    resolve(null);
+
+    // Try to restore token from session (user navigated between pages)
+    const savedToken = loadTokenFromSession();
+    if (savedToken) {
+      _accessToken = savedToken;
+      _signedIn = true;
+      _folderId = sessionStorage.getItem(SS_FOLDER) || null;
+      _fileId   = sessionStorage.getItem(SS_FILE)   || null;
+      updateAuthUI(true);
+      loadFromDrive().then(() => resolve(true));
+    } else {
+      resolve(null);
+    }
   });
 }
 
@@ -53,6 +94,7 @@ function signIn() {
 function signOut() {
   if (_accessToken) google.accounts.oauth2.revoke(_accessToken, () => {});
   _accessToken = null; _signedIn = false; _folderId = null; _fileId = null; _initialized = false;
+  clearSession();
   updateAuthUI(false);
 }
 
@@ -79,18 +121,20 @@ async function driveRequest(url, options = {}) {
 
 async function findOrCreateFolder() {
   const search = await driveRequest(`https://www.googleapis.com/drive/v3/files?q=name='${DRIVE_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name)`);
-  if (search.files && search.files.length > 0) { _folderId = search.files[0].id; return _folderId; }
+  if (search.files && search.files.length > 0) { _folderId = search.files[0].id; sessionStorage.setItem(SS_FOLDER, _folderId); return _folderId; }
   const folder = await driveRequest('https://www.googleapis.com/drive/v3/files', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: DRIVE_FOLDER, mimeType: 'application/vnd.google-apps.folder' }),
   });
-  _folderId = folder.id; return _folderId;
+  _folderId = folder.id;
+  sessionStorage.setItem(SS_FOLDER, _folderId);
+  return _folderId;
 }
 
 async function findDataFile() {
   await findOrCreateFolder();
   const search = await driveRequest(`https://www.googleapis.com/drive/v3/files?q=name='${DATA_FILENAME}' and '${_folderId}' in parents and trashed=false&fields=files(id,name,modifiedTime)`);
-  if (search.files && search.files.length > 0) { _fileId = search.files[0].id; return _fileId; }
+  if (search.files && search.files.length > 0) { _fileId = search.files[0].id; sessionStorage.setItem(SS_FILE, _fileId); return _fileId; }
   return null;
 }
 
@@ -141,6 +185,7 @@ async function saveToDrive(makeBackup = false) {
       });
       const file = await res.json();
       _fileId = file.id;
+      sessionStorage.setItem(SS_FILE, _fileId);
     }
     if (makeBackup) {
       const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
