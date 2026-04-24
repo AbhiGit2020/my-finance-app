@@ -15,6 +15,7 @@
 .asset-kpi-sm-label { font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em; }
 .asset-kpi-sm-value { font-size:1.1rem; font-weight:700; font-family:'IBM Plex Mono',monospace; margin-top:3px; }
 </style>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -27,9 +28,9 @@
     <a href="stocks.html">Stocks</a>
     <a href="assets.html" class="active">Assets</a>
   </div>
-  <div class="nav-actions">
-    <button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Export Excel</button>
-    <button class="btn btn-secondary btn-sm" onclick="exportJsonBackup()">💾 Backup JSON</button>
+  <div class="nav-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+    <div style="display:flex;gap:6px"><button id="authBtn" class="btn btn-secondary btn-sm" onclick="signIn()">🔑 Sign in with Google</button><button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Excel</button><button class="btn btn-secondary btn-sm" onclick="driveSync(true)">☁️ Save & Backup</button></div>
+    <div id="authStatus" style="font-size:0.72rem;color:var(--yellow)">⚠️ Not signed in</div><div id="driveStatus" style="font-size:0.72rem;color:var(--text-muted)"></div>
   </div>
 </nav>
 
@@ -346,6 +347,7 @@ function exportAssetsExcel(){
   ]);
 }
 
+window.onDataLoaded = render;
 render();
 </script>
 </body>

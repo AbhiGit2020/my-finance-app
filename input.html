@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="js/store.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -18,9 +19,9 @@
     <a href="stocks.html">Stocks</a>
     <a href="assets.html">Assets</a>
   </div>
-  <div class="nav-actions">
-    <button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Export Excel</button>
-    <button class="btn btn-secondary btn-sm" onclick="exportJsonBackup()">💾 Backup JSON</button>
+  <div class="nav-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+    <div style="display:flex;gap:6px"><button id="authBtn" class="btn btn-secondary btn-sm" onclick="signIn()">🔑 Sign in with Google</button><button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Excel</button><button class="btn btn-secondary btn-sm" onclick="driveSync(true)">☁️ Save & Backup</button></div>
+    <div id="authStatus" style="font-size:0.72rem;color:var(--yellow)">⚠️ Not signed in</div><div id="driveStatus" style="font-size:0.72rem;color:var(--text-muted)"></div>
   </div>
 </nav>
 
