@@ -117,6 +117,8 @@ function signOut() {
 
 // ── Trigger page render ───────────────────────────────────
 function triggerRender() {
+  const overlay = document.getElementById('loadingOverlay');
+  if (overlay) { overlay.style.opacity='0'; setTimeout(()=>overlay.style.display='none',300); }
   if (typeof window.onDataLoaded === 'function') window.onDataLoaded();
 }
 

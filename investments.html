@@ -9,6 +9,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
+<div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading your data from Google Drive…</div></div>
 
 <nav class="nav">
   <a class="nav-brand" href="index.html">💰 MyFinance</a>
@@ -20,7 +21,7 @@
     <a href="assets.html">Assets</a>
   </div>
   <div class="nav-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-    <div style="display:flex;gap:6px"><button id="authBtn" class="btn btn-secondary btn-sm" onclick="signIn()">🔑 Sign in with Google</button><button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Excel</button><button class="btn btn-secondary btn-sm" onclick="driveSave()">☁️ Save</button></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><button id="authBtn" class="btn btn-secondary btn-sm" onclick="signIn()">🔑 Sign in with Google</button><button class="btn btn-secondary btn-sm" onclick="refreshFromDrive()">🔄 Refresh</button><button class="btn btn-primary btn-sm" onclick="driveSave()">☁️ Save</button><button class="btn btn-secondary btn-sm" onclick="driveBackup()">💾 Backup</button><button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Excel</button></div>
     <div id="authStatus" style="font-size:0.72rem;color:var(--yellow)">⚠️ Not signed in</div><div id="driveStatus" style="font-size:0.72rem;color:var(--text-muted)"></div>
   </div>
 </nav>
@@ -435,8 +436,17 @@ function render(){
   renderTable();
 }
 
+
+// ── Refresh from Drive ────────────────────────────────────
+async function refreshFromDrive() {
+  const overlay = document.getElementById('loadingOverlay');
+  const msg = document.getElementById('loadingMsg');
+  if (overlay) { overlay.style.display='flex'; overlay.style.opacity='1'; }
+  if (msg) msg.textContent = 'Refreshing from Google Drive…';
+  await loadFromDrive();
+}
+
 window.onDataLoaded = render;
-render();
 </script>
 </body>
 </html>

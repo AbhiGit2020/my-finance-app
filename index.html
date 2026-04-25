@@ -25,6 +25,7 @@
 </style>
 </head>
 <body>
+<div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading your data from Google Drive…</div></div>
 
 <nav class="nav">
   <a class="nav-brand" href="index.html">💰 MyFinance</a>
@@ -378,8 +379,17 @@ function renderEmpty() {
   document.getElementById('yearTabs').innerHTML = '';
 }
 
+
+// ── Refresh from Drive ────────────────────────────────────
+async function refreshFromDrive() {
+  const overlay = document.getElementById('loadingOverlay');
+  const msg = document.getElementById('loadingMsg');
+  if (overlay) { overlay.style.display='flex'; overlay.style.opacity='1'; }
+  if (msg) msg.textContent = 'Refreshing from Google Drive…';
+  await loadFromDrive();
+}
+
 window.onDataLoaded = render;
-render();
 </script>
 </body>
 </html>
