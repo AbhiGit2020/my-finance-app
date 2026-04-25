@@ -200,40 +200,13 @@ async function fetchOneTicker(ticker) {
   if (!quote.c) throw new Error('no price data');
 
   const close   = quote.c;   // current price
-  const moRef   = quote.pc;  // previous close (use as ~1 day ref; we'll use candles for wk/mo/ytd)
-  const wkRef   = quote.pc;
-  const ytdRef  = quote.pc;
-
-  // 2. Try to get historical candles for better wk/mo/ytd refs
-  try {
-    const now    = Math.floor(Date.now() / 1000);
-    const yr_ago = now - 365 * 24 * 3600;
-    const candleRes = await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${ticker}&resolution=D&from=${yr_ago}&to=${now}&token=${FINNHUB_KEY}`);
-    if (candleRes.ok) {
-      const candle = await candleRes.json();
-      if (candle.s === 'ok' && candle.c && candle.c.length > 0) {
-        const closes = candle.c;
-        const times  = candle.t;
-        const n      = closes.length;
-        const wk     = n >= 6  ? closes[n - 6]  : closes[0];
-        const mo     = n >= 22 ? closes[n - 22] : closes[0];
-
-        // YTD: find first close of current year
-        const curYear = new Date().getFullYear();
-        const ytdIdx  = times.findIndex(t => new Date(t * 1000).getFullYear() === curYear);
-        const ytd     = ytdIdx >= 0 ? closes[ytdIdx] : closes[0];
-
-        return {
-          asof_date: new Date().toISOString().slice(0, 10),
-          close, wk_ref: wk, mo_ref: mo, ytd_ref: ytd,
-        };
-      }
-    }
-  } catch(e) { /* fall through to basic quote data */ }
-
+  // Use quote data only (free plan - no historical candles)
   return {
     asof_date: new Date().toISOString().slice(0, 10),
-    close, wk_ref: wkRef, mo_ref: moRef, ytd_ref: ytdRef,
+    close,
+    wk_ref:  parseFloat(quote.pc) || close,  // prev close as wk reference
+    mo_ref:  parseFloat(quote.pc) || close,
+    ytd_ref: parseFloat(quote.pc) || close,
   };
 }
 
@@ -492,15 +465,15 @@ function exportStocksExcel(){
 
 
 // ── Portfolio Chart ───────────────────────────────────────
-let portfolioChart = null;
-let chartMode = 'total';
-let chartDataCache = null;
+window.portfolioChart = null;
+window.chartMode = 'total';
+window.chartDataCache = null;
 
 function setChartMode(mode) {
-  chartMode = mode;
+  window.chartMode = mode;
   document.getElementById('toggleTotal').classList.toggle('active', mode==='total');
   document.getElementById('toggleStocks').classList.toggle('active', mode==='stocks');
-  if (chartDataCache) renderPortfolioChart(chartDataCache);
+  if (window.chartDataCache) renderPortfolioChart(window.chartDataCache);
 }
 
 function buildPortfolioChart() {
@@ -602,24 +575,24 @@ function buildPortfolioChart() {
   const trimStocks = {};
   tickers.forEach(t => trimStocks[t] = stockDatasets[t].slice(startIdx));
 
-  chartDataCache = { allDates: trimDates, totalValues: trimTotal, stockDatasets: trimStocks, tickers };
+  window.chartDataCache = { allDates: trimDates, totalValues: trimTotal, stockDatasets: trimStocks, tickers };
   document.getElementById('chartLoading').style.display = 'none';
   document.getElementById('chartWrap').style.display = 'block';
   document.getElementById('stockPerformance').style.display = 'block';
-  renderPortfolioChart(chartDataCache);
+  renderPortfolioChart(window.chartDataCache);
 }
 
 const CHART_COLORS = ['#068a91','#3fb950','#d29922','#f85149','#a371f7','#58a6ff','#fb8500','#2dc653'];
 
 function renderPortfolioChart(data) {
   const { allDates, totalValues, stockDatasets, tickers } = data;
-  if (portfolioChart) portfolioChart.destroy();
+  if (window.portfolioChart) portfolioChart.destroy();
 
   const ctx = document.getElementById('portfolioChart');
   const labels = allDates.map(d => { const dt = new Date(d); return dt.toLocaleDateString('en-SG',{month:'short',year:'2-digit'}); });
 
   let datasets;
-  if (chartMode === 'total') {
+  if (window.chartMode === 'total') {
     datasets = [{
       label: 'Total Portfolio Value',
       data: totalValues,
@@ -644,7 +617,7 @@ function renderPortfolioChart(data) {
     }));
   }
 
-  portfolioChart = new Chart(ctx, {
+  window.portfolioChart = new Chart(ctx, {
     type: 'line',
     data: { labels, datasets },
     options: {
