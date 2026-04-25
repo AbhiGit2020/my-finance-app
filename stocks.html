@@ -480,15 +480,24 @@ function setChartMode(mode) {
 }
 
 function buildPortfolioChart() {
+  // Always destroy existing chart and clear cache first
+  if (window.portfolioChart) { window.portfolioChart.destroy(); window.portfolioChart = null; }
+  window.chartDataCache = null;
+  const chartWrap = document.getElementById('chartWrap');
+  const chartLoading = document.getElementById('chartLoading');
+  const perf = document.getElementById('stockPerformance');
+  if (chartWrap) chartWrap.style.display = 'none';
+  if (perf) perf.style.display = 'none';
+
   const txns = loadStockTransactions().filter(r => r.profile === profile());
   if (!txns.length) {
-    document.getElementById('chartLoading').textContent = 'Add transactions to see portfolio performance.';
+    if (chartLoading) { chartLoading.style.display = 'block'; chartLoading.textContent = 'No transactions for this profile yet.'; }
     return;
   }
 
   const storedPrices = loadStockPrices().filter(p => p.profile === profile());
   if (!storedPrices.length) {
-    document.getElementById('chartLoading').textContent = 'Click "📈 Fetch Prices" to load current prices, then the chart will appear.';
+    if (chartLoading) { chartLoading.style.display = 'block'; chartLoading.textContent = 'Click "📈 Fetch Prices" to load current prices, then the chart will appear.'; }
     return;
   }
 
