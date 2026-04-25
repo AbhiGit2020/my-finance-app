@@ -29,6 +29,34 @@ function emptyDb() {
   };
 }
 
+
+// ── Global Profile Management ─────────────────────────────
+const PROFILES = ['Abhi', 'Wife', 'Joint', 'Kids'];
+const PROFILE_KEY = 'hf_active_profile';
+
+function getActiveProfile() {
+  return localStorage.getItem(PROFILE_KEY) || 'Abhi';
+}
+
+function setActiveProfile(name) {
+  localStorage.setItem(PROFILE_KEY, name);
+  // Update all profile selectors on the page
+  document.querySelectorAll('.global-profile-sel').forEach(sel => sel.value = name);
+  // Re-render page
+  if (typeof window.onDataLoaded === 'function') window.onDataLoaded();
+}
+
+function initProfileSelector() {
+  const active = getActiveProfile();
+  document.querySelectorAll('.global-profile-sel').forEach(sel => {
+    sel.innerHTML = PROFILES.map(p => 
+      `<option value="${p}" ${p === active ? 'selected' : ''}>${p}</option>`
+    ).join('');
+    sel.value = active;
+    sel.onchange = () => setActiveProfile(sel.value);
+  });
+}
+
 // ── Session ───────────────────────────────────────────────
 function saveSession(token, expiresIn) {
   sessionStorage.setItem(SS_TOKEN, token);
@@ -117,6 +145,7 @@ function signOut() {
 
 // ── Trigger page render ───────────────────────────────────
 function triggerRender() {
+  initProfileSelector();
   const overlay = document.getElementById('loadingOverlay');
   if (overlay) { overlay.style.opacity='0'; setTimeout(()=>overlay.style.display='none',300); }
   if (typeof window.onDataLoaded === 'function') window.onDataLoaded();
@@ -261,6 +290,7 @@ function loadAssetValues()       { return _db.asset_values       || []; }
 function loadInvestmentData()    { return _db.investment_data    || []; }
 
 function saveFinanceRecords(arr)    { _db.finance_records    = arr; }
+function getProfileRecords() { return (_db.finance_records||[]).filter(r=>r.profile===getActiveProfile()||!r.profile); }
 function saveCategories(arr)        { _db.finance_categories = arr; }
 function saveUselessExpenses(arr)   { _db.useless_expenses   = arr; }
 function saveStockTransactions(arr) { _db.stock_transactions = arr; }

@@ -31,6 +31,12 @@
     <a href="stocks.html" class="active">Stocks</a>
     <a href="assets.html">Assets</a>
   </div>
+  <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:0.78rem;color:var(--text-muted);font-weight:600">👤 Profile:</span>
+      <select class="global-profile-sel" style="background:var(--bg3);border:1px solid var(--teal);color:var(--teal);border-radius:6px;padding:4px 10px;font-size:0.84rem;font-weight:700;cursor:pointer"></select>
+    </div>
+  </div>
   <div class="nav-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding:6px 0">
     <div style="display:flex;gap:6px;flex-wrap:wrap"><button id="authBtn" class="btn btn-secondary btn-sm" onclick="signIn()">🔑 Sign in with Google</button><button class="btn btn-secondary btn-sm" onclick="refreshFromDrive()">🔄 Refresh</button><button class="btn btn-primary btn-sm" onclick="driveSave()">☁️ Save</button><button class="btn btn-secondary btn-sm" onclick="driveBackup()">💾 Backup</button><button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Excel</button></div>
     <div id="authStatus" style="font-size:0.72rem;color:var(--yellow)">⚠️ Not signed in</div><div id="driveStatus" style="font-size:0.72rem;color:var(--text-muted)"></div>
@@ -42,12 +48,7 @@
 
   <!-- Profile selector -->
   <div class="flex flex-gap flex-center mb-16 flex-wrap">
-    <div class="form-group">
-      <label>👤 Profile</label>
-      <select id="profileSel" class="input-md" onchange="render()">
-        <option>Abhi</option><option>Wife</option><option>Kid</option><option>Joint</option><option>Other</option>
-      </select>
-    </div>
+
     <div style="margin-left:auto;display:flex;gap:8px;align-items:flex-end">
       <button class="btn btn-primary" id="fetchBtn" onclick="fetchPrices()">🔄 Fetch Yahoo Prices</button>
       <button class="btn btn-secondary" onclick="exportStocksExcel()">⬇ Export Excel</button>
@@ -169,7 +170,7 @@ function fmt(n,dec=2){ return Number(n||0).toLocaleString('en-SG',{minimumFracti
 function fmtN(n){ return fmt(n,0); }
 function pct(a,b){ if(!b) return 0; return (a-b)/b*100; }
 
-function profile(){ return document.getElementById('profileSel').value; }
+function profile(){ return getActiveProfile(); }
 
 // ── Holdings computation ──────────────────────────────────
 function computeHoldings(txns){
