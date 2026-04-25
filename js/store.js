@@ -42,6 +42,20 @@ function setActiveProfile(name) {
   localStorage.setItem(PROFILE_KEY, name);
   // Update all profile selectors on the page
   document.querySelectorAll('.global-profile-sel').forEach(sel => sel.value = name);
+  // Clear stale data displays before re-render
+  const tables = ['holdingsTable','realizedTable','txTable'];
+  tables.forEach(id => { const el = document.getElementById(id); if(el) el.innerHTML = ''; });
+  const kpis = document.getElementById('stockKPIs');
+  if(kpis) kpis.innerHTML = '';
+  // Reset chart
+  if(window.portfolioChart) { window.portfolioChart.destroy(); window.portfolioChart = null; }
+  window.chartDataCache = null;
+  const chartWrap = document.getElementById('chartWrap');
+  const chartLoading = document.getElementById('chartLoading');
+  if(chartWrap) chartWrap.style.display = 'none';
+  if(chartLoading) { chartLoading.style.display = 'block'; chartLoading.textContent = 'Click "📈 Fetch Prices" first, then the chart will appear here.'; }
+  const perf = document.getElementById('stockPerformance');
+  if(perf) perf.style.display = 'none';
   // Re-render page
   if (typeof window.onDataLoaded === 'function') window.onDataLoaded();
 }
