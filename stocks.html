@@ -99,7 +99,7 @@
 
   <!-- Price entry (manual override) -->
   <details>
-    <summary>📝 Manual Price Entry (override Yahoo)</summary>
+    <summary>📝 Manual Price Entry (override auto-fetch)</summary>
     <div class="details-content">
       <p class="text-muted mb-16" style="font-size:0.83rem">Enter prices manually if Yahoo fetch is unavailable. Wk ref = 1-week ago price, Mo ref = 1-month ago, YTD ref = Jan 1 price.</p>
       <div id="manualPriceForm"></div>
@@ -112,8 +112,8 @@
     <div class="chart-title">
       <span>📈 Portfolio Performance</span>
       <div class="toggle-group">
-        <button class="toggle-btn active" id="toggleTotal" onclick="setChartMode('total')">Total Value</button>
-        <button class="toggle-btn" id="toggleStocks" onclick="setChartMode('stocks')">By Stock</button>
+        <button class="toggle-btn active" id="toggleTotal" onclick="window.setChartMode&&window.setChartMode('total')">Total Value</button>
+        <button class="toggle-btn" id="toggleStocks" onclick="window.setChartMode&&window.setChartMode('stocks')">By Stock</button>
       </div>
     </div>
     <div id="chartLoading" class="chart-loading">Click "📈 Fetch Prices" first, then the chart will appear here.</div>
@@ -265,6 +265,7 @@ async function fetchPrices() {
   if (failed.length) toast(`Fetched ${fetched}. Failed: ${failed.join(', ')} — check ticker symbol or use Manual Entry.`, 'info');
   else toast(`Prices updated for ${fetched} ticker(s) ✓`);
   render();
+  buildPortfolioChart();
 }
 
 // ── Render KPIs + holdings ────────────────────────────────
@@ -489,6 +490,232 @@ function exportStocksExcel(){
 }
 
 
+
+// ── Portfolio Chart ───────────────────────────────────────
+let portfolioChart = null;
+let chartMode = 'total';
+let chartDataCache = null;
+
+function setChartMode(mode) {
+  chartMode = mode;
+  document.getElementById('toggleTotal').classList.toggle('active', mode==='total');
+  document.getElementById('toggleStocks').classList.toggle('active', mode==='stocks');
+  if (chartDataCache) renderPortfolioChart(chartDataCache);
+}
+
+function buildPortfolioChart() {
+  const txns = loadStockTransactions().filter(r => r.profile === profile());
+  if (!txns.length) {
+    document.getElementById('chartLoading').textContent = 'Add transactions to see portfolio performance.';
+    return;
+  }
+
+  const storedPrices = loadStockPrices().filter(p => p.profile === profile());
+  if (!storedPrices.length) {
+    document.getElementById('chartLoading').textContent = 'Click "📈 Fetch Prices" to load current prices, then the chart will appear.';
+    return;
+  }
+
+  const { holdings } = computeHoldings(txns);
+  if (!holdings.length) return;
+
+  const tickers = [...new Set(holdings.map(h => h.ticker))];
+
+  // Build chart using stored price snapshots per ticker
+  // Each price record has asof_date, close, wk_ref, mo_ref, ytd_ref
+  // We construct timeline: ytd start, 1-month ago, 1-week ago, today
+  const today = new Date().toISOString().slice(0,10);
+  const sortedTxns = [...txns].sort((a,b) => new Date(a.date)-new Date(b.date));
+  const firstDate = sortedTxns[0]?.date || today;
+
+  function holdingsAtDate(dateStr) {
+    const positions = {};
+    sortedTxns.forEach(t => {
+      if (t.date > dateStr) return;
+      if (!positions[t.ticker]) positions[t.ticker] = {qty:0, cost:0};
+      if (t.action==='BUY') { positions[t.ticker].qty += parseFloat(t.qty)||0; positions[t.ticker].cost += (parseFloat(t.qty)||0)*(parseFloat(t.price)||0); }
+      else { const avg=positions[t.ticker].qty?positions[t.ticker].cost/positions[t.ticker].qty:0; positions[t.ticker].qty-=parseFloat(t.qty)||0; positions[t.ticker].cost-=(parseFloat(t.qty)||0)*avg; }
+    });
+    return positions;
+  }
+
+  // Build 4-point timeline from stored price data
+  const priceMap = {};
+  storedPrices.forEach(p => { priceMap[p.ticker] = p; });
+
+  // Timeline points: buy dates + reference points from stored prices
+  const buyDates = [...new Set(txns.map(t=>t.date))].sort();
+  
+  // Get reference dates from prices
+  const samplePrice = storedPrices[0];
+  const asofDate = samplePrice?.asof_date || today;
+  const curYear = new Date().getFullYear();
+  const ytdDate = `${curYear}-01-01`;
+  const moDate  = new Date(Date.now() - 30*24*3600*1000).toISOString().slice(0,10);
+  const wkDate  = new Date(Date.now() -  7*24*3600*1000).toISOString().slice(0,10);
+
+  // Combine: unique buy dates + reference dates, all sorted
+  const allDates = [...new Set([...buyDates, ytdDate, moDate, wkDate, asofDate])].sort().filter(d => d >= firstDate);
+
+  function portfolioValueAtDate(dateStr, useRefPrice) {
+    const pos = holdingsAtDate(dateStr);
+    let total = 0;
+    const byStock = {};
+    tickers.forEach(ticker => {
+      const qty = pos[ticker]?.qty || 0;
+      if (qty <= 0) { byStock[ticker] = 0; return; }
+      let price = 0;
+      const p = priceMap[ticker];
+      if (!p) { byStock[ticker] = 0; return; }
+      if (useRefPrice === 'ytd')  price = parseFloat(p.ytd_ref) || parseFloat(p.close) || 0;
+      else if (useRefPrice === 'mo') price = parseFloat(p.mo_ref)  || parseFloat(p.close) || 0;
+      else if (useRefPrice === 'wk') price = parseFloat(p.wk_ref)  || parseFloat(p.close) || 0;
+      else price = parseFloat(p.close) || 0;
+      const val = qty * price;
+      byStock[ticker] = val;
+      total += val;
+    });
+    return { total, byStock };
+  }
+
+  // For each date, figure out which price reference to use
+  const totalValues = [];
+  const stockDatasets = {};
+  tickers.forEach(t => stockDatasets[t] = []);
+
+  allDates.forEach(dateStr => {
+    let ref = 'close';
+    if (dateStr <= ytdDate) ref = 'ytd';
+    else if (dateStr <= moDate) ref = 'mo';
+    else if (dateStr <= wkDate) ref = 'wk';
+    
+    const { total, byStock } = portfolioValueAtDate(dateStr, ref);
+    totalValues.push(total);
+    tickers.forEach(t => stockDatasets[t].push(byStock[t] || 0));
+  });
+
+  // Filter out zero-value dates at start
+  let startIdx = 0;
+  while (startIdx < totalValues.length - 1 && totalValues[startIdx] === 0) startIdx++;
+  const trimDates  = allDates.slice(startIdx);
+  const trimTotal  = totalValues.slice(startIdx);
+  const trimStocks = {};
+  tickers.forEach(t => trimStocks[t] = stockDatasets[t].slice(startIdx));
+
+  chartDataCache = { allDates: trimDates, totalValues: trimTotal, stockDatasets: trimStocks, tickers };
+  document.getElementById('chartLoading').style.display = 'none';
+  document.getElementById('chartWrap').style.display = 'block';
+  document.getElementById('stockPerformance').style.display = 'block';
+  renderPortfolioChart(chartDataCache);
+}
+
+const CHART_COLORS = ['#068a91','#3fb950','#d29922','#f85149','#a371f7','#58a6ff','#fb8500','#2dc653'];
+
+function renderPortfolioChart(data) {
+  const { allDates, totalValues, stockDatasets, tickers } = data;
+  if (portfolioChart) portfolioChart.destroy();
+
+  const ctx = document.getElementById('portfolioChart');
+  const labels = allDates.map(d => { const dt = new Date(d); return dt.toLocaleDateString('en-SG',{month:'short',year:'2-digit'}); });
+
+  let datasets;
+  if (chartMode === 'total') {
+    datasets = [{
+      label: 'Total Portfolio Value',
+      data: totalValues,
+      borderColor: '#068a91',
+      backgroundColor: 'rgba(6,138,145,0.12)',
+      borderWidth: 2.5,
+      fill: true,
+      tension: 0.3,
+      pointRadius: 2,
+      pointHoverRadius: 5,
+    }];
+  } else {
+    datasets = tickers.map((ticker, i) => ({
+      label: ticker,
+      data: stockDatasets[ticker],
+      borderColor: CHART_COLORS[i % CHART_COLORS.length],
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      tension: 0.3,
+      pointRadius: 1,
+      pointHoverRadius: 4,
+    }));
+  }
+
+  portfolioChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#8b949e', font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: S$ ${Number(ctx.raw).toLocaleString('en-SG', {minimumFractionDigits:0,maximumFractionDigits:0})}`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#8b949e', maxTicksLimit: 12 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { ticks: { color: '#8b949e', callback: v => 'S$' + Number(v).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0}) }, grid: { color: 'rgba(255,255,255,0.05)' } }
+      }
+    }
+  });
+
+  // Stock performance table
+  renderStockPerformance(data);
+}
+
+function renderStockPerformance(data) {
+  const { totalValues, stockDatasets, tickers } = data;
+  const totalNow = totalValues[totalValues.length - 1] || 0;
+
+  const rows = tickers.map((ticker, i) => {
+    const vals = stockDatasets[ticker];
+    const first = vals.find(v => v > 0) || 0;
+    const last  = vals[vals.length - 1] || 0;
+    const pct   = first > 0 ? ((last - first) / first * 100) : 0;
+    const portPct = totalNow > 0 ? (last / totalNow * 100) : 0;
+    return { ticker, value: last, pct, portPct, color: CHART_COLORS[i % CHART_COLORS.length] };
+  }).sort((a, b) => b.pct - a.pct);
+
+  const avgPct = rows.reduce((s, r) => s + r.pct, 0) / (rows.length || 1);
+
+  let html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.83rem"><thead><tr>';
+  html += '<th style="text-align:left;padding:7px 10px;color:var(--text-muted)">Stock</th>';
+  html += '<th style="padding:7px 10px;color:var(--text-muted)">Current Value</th>';
+  html += '<th style="padding:7px 10px;color:var(--text-muted)">% of Portfolio</th>';
+  html += '<th style="padding:7px 10px;color:var(--text-muted)">Return %</th>';
+  html += '<th style="padding:7px 10px;color:var(--text-muted)">vs Portfolio Avg</th>';
+  html += '</tr></thead><tbody>';
+
+  rows.forEach(r => {
+    const vsAvg = r.pct - avgPct;
+    html += `<tr>
+      <td style="padding:7px 10px;font-weight:700"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${r.color};margin-right:6px"></span>${r.ticker}</td>
+      <td style="padding:7px 10px;text-align:right">S$ ${Number(r.value).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+      <td style="padding:7px 10px;text-align:right">${r.portPct.toFixed(1)}%</td>
+      <td style="padding:7px 10px;text-align:right;color:${r.pct>=0?'var(--green)':'var(--red)'};font-weight:600">${r.pct>=0?'+':''}${r.pct.toFixed(1)}%</td>
+      <td style="padding:7px 10px;text-align:right;color:${vsAvg>=0?'var(--green)':'var(--red)'}">${vsAvg>=0?'▲':'▼'} ${Math.abs(vsAvg).toFixed(1)}%</td>
+    </tr>`;
+  });
+
+  html += `<tr style="background:var(--bg3);border-top:1px solid var(--border2)">
+    <td style="padding:7px 10px;font-weight:700">Portfolio Avg</td>
+    <td style="padding:7px 10px;text-align:right;font-weight:700">S$ ${Number(totalNow).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+    <td style="padding:7px 10px;text-align:right">100%</td>
+    <td style="padding:7px 10px;text-align:right;font-weight:700;color:${avgPct>=0?'var(--green)':'var(--red)'}">${avgPct>=0?'+':''}${avgPct.toFixed(1)}%</td>
+    <td style="padding:7px 10px;text-align:center;color:var(--text-muted)">—</td>
+  </tr>`;
+
+  html += '</tbody></table></div>';
+  document.getElementById('stockPerformance').innerHTML = html;
+}
+
 // ── Refresh from Drive ────────────────────────────────────
 async function refreshFromDrive() {
   const overlay = document.getElementById('loadingOverlay');
@@ -498,7 +725,7 @@ async function refreshFromDrive() {
   await loadFromDrive();
 }
 
-window.onDataLoaded = render;
+window.onDataLoaded = function() { render(); buildPortfolioChart(); };
 </script>
 </body>
 </html>
