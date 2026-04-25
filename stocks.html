@@ -5,8 +5,19 @@
 <title>My Finance App — Stock Portfolio</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="js/store.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<style>
+.chart-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
+.chart-title { font-size:0.88rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; }
+.chart-wrap { position:relative; height:300px; }
+.toggle-group { display:flex; gap:6px; }
+.toggle-btn { background:var(--bg3); border:1px solid var(--border); color:var(--text-muted); border-radius:6px; padding:4px 12px; font-size:0.78rem; font-weight:600; cursor:pointer; transition:all 0.15s; }
+.toggle-btn.active { background:var(--teal); border-color:var(--teal); color:#fff; }
+.chart-loading { text-align:center; padding:40px; color:var(--text-muted); font-size:0.88rem; }
+</style>
 </head>
 <body>
 <div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading your data from Google Drive…</div></div>
@@ -20,7 +31,7 @@
     <a href="stocks.html" class="active">Stocks</a>
     <a href="assets.html">Assets</a>
   </div>
-  <div class="nav-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+  <div class="nav-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding:6px 0">
     <div style="display:flex;gap:6px;flex-wrap:wrap"><button id="authBtn" class="btn btn-secondary btn-sm" onclick="signIn()">🔑 Sign in with Google</button><button class="btn btn-secondary btn-sm" onclick="refreshFromDrive()">🔄 Refresh</button><button class="btn btn-primary btn-sm" onclick="driveSave()">☁️ Save</button><button class="btn btn-secondary btn-sm" onclick="driveBackup()">💾 Backup</button><button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Excel</button></div>
     <div id="authStatus" style="font-size:0.72rem;color:var(--yellow)">⚠️ Not signed in</div><div id="driveStatus" style="font-size:0.72rem;color:var(--text-muted)"></div>
   </div>
@@ -95,7 +106,22 @@
     </div>
   </details>
 
-  <hr class="divider">
+  
+  <!-- Portfolio Value Chart -->
+  <div class="chart-card">
+    <div class="chart-title">
+      <span>📈 Portfolio Performance</span>
+      <div class="toggle-group">
+        <button class="toggle-btn active" id="toggleTotal" onclick="setChartMode('total')">Total Value</button>
+        <button class="toggle-btn" id="toggleStocks" onclick="setChartMode('stocks')">By Stock</button>
+      </div>
+    </div>
+    <div id="chartLoading" class="chart-loading">Click "📈 Fetch Prices" first, then the chart will appear here.</div>
+    <div class="chart-wrap" id="chartWrap" style="display:none"><canvas id="portfolioChart"></canvas></div>
+    <div id="stockPerformance" style="margin-top:16px;display:none"></div>
+  </div>
+
+<hr class="divider">
 
   <!-- Holdings table -->
   <div class="section-header"><div class="section-title">📋 Holdings</div></div>

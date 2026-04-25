@@ -29,7 +29,7 @@
     <a href="stocks.html">Stocks</a>
     <a href="assets.html" class="active">Assets</a>
   </div>
-  <div class="nav-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+  <div class="nav-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding:6px 0">
     <div style="display:flex;gap:6px;flex-wrap:wrap"><button id="authBtn" class="btn btn-secondary btn-sm" onclick="signIn()">🔑 Sign in with Google</button><button class="btn btn-secondary btn-sm" onclick="refreshFromDrive()">🔄 Refresh</button><button class="btn btn-primary btn-sm" onclick="driveSave()">☁️ Save</button><button class="btn btn-secondary btn-sm" onclick="driveBackup()">💾 Backup</button><button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Excel</button></div>
     <div id="authStatus" style="font-size:0.72rem;color:var(--yellow)">⚠️ Not signed in</div><div id="driveStatus" style="font-size:0.72rem;color:var(--text-muted)"></div>
   </div>

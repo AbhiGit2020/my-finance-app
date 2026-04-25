@@ -193,7 +193,7 @@ async function loadFromDrive() {
 async function driveSave() {
   if (!_accessToken) { showStatus('⚠️ Not signed in', 'var(--yellow)'); return false; }
   try {
-    showStatus('⏳ Saving…');
+    showStatus('⏳ Saving to Google Drive…');
     const blob = new Blob([JSON.stringify({ ..._db, saved_at: new Date().toISOString() }, null, 2)], { type: 'application/json' });
     const folderId = await ensureFolder();
 
@@ -213,7 +213,7 @@ async function driveSave() {
       _fileId = (await res.json()).id;
       sessionStorage.setItem(SS_FILE, _fileId);
     }
-    showStatus(`✅ Saved — ${new Date().toLocaleTimeString()}`, 'var(--green)');
+    showStatus(`✅ Saved to Google Drive — ${new Date().toLocaleTimeString()}`, 'var(--green)');
     return true;
   } catch(e) {
     console.error('driveSave:', e);
@@ -236,7 +236,7 @@ async function driveBackup() {
     await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
       method: 'POST', headers: { Authorization: `Bearer ${_accessToken}` }, body: form,
     });
-    showStatus(`✅ Backup created — ${ts}`, 'var(--green)');
+    showStatus(`✅ Backup saved: backup_${ts}.json`, 'var(--green)');
     return true;
   } catch(e) {
     showStatus('⚠️ Backup failed', 'var(--red)');
