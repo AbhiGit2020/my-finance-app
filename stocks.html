@@ -25,21 +25,23 @@
 <nav class="nav">
   <a class="nav-brand" href="index.html">💰 MyFinance</a>
   <div class="nav-links">
-    <a href="index.html">Dashboard</a>
-    <a href="input.html">Finance Input</a>
-    <a href="investments.html">Investments</a>
+    <a href="index.html" class="">Dashboard</a>
+    <a href="input.html" class="">Finance Input</a>
+    <a href="investments.html" class="">Investments</a>
     <a href="stocks.html" class="active">Stocks</a>
-    <a href="assets.html">Assets</a>
+    <a href="assets.html" class="">Assets</a>
   </div>
-  <div style="display:flex;align-items:center;gap:10px;margin-left:auto">
-    <div style="display:flex;align-items:center;gap:6px">
-      <span style="font-size:0.78rem;color:var(--text-muted);font-weight:600">👤 Profile:</span>
-      <select class="global-profile-sel" style="background:var(--bg3);border:1px solid var(--teal);color:var(--teal);border-radius:6px;padding:4px 10px;font-size:0.84rem;font-weight:700;cursor:pointer"></select>
+  <div class="nav-right">
+    <span id="driveStatus" class="drive-status-text"></span>
+    <span id="authStatus" class="auth-badge"></span>
+    <div class="nav-btn-row">
+      <select class="global-profile-sel profile-sel-nav"></select>
+      <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">🔑 Sign in</button>
+      <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">🔄</button>
+      <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
+      <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">💾</button>
+      <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
     </div>
-  </div>
-  <div class="nav-actions" style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;padding:6px 0">
-    <div style="display:flex;gap:6px;flex-wrap:wrap"><button id="authBtn" class="btn btn-secondary btn-sm" onclick="signIn()">🔑 Sign in with Google</button><button class="btn btn-secondary btn-sm" onclick="refreshFromDrive()">🔄 Refresh</button><button class="btn btn-primary btn-sm" onclick="driveSave()">☁️ Save</button><button class="btn btn-secondary btn-sm" onclick="driveBackup()">💾 Backup</button><button class="btn btn-secondary btn-sm" onclick="exportAllData()">⬇ Excel</button></div>
-    <div id="authStatus" style="font-size:0.72rem;color:var(--yellow)">⚠️ Not signed in</div><div id="driveStatus" style="font-size:0.72rem;color:var(--text-muted)"></div>
   </div>
 </nav>
 

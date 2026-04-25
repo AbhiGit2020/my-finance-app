@@ -80,10 +80,10 @@ function updateAuthUI(signedIn) {
   if (!btn) return;
   if (signedIn) {
     btn.textContent = '🔓 Sign Out'; btn.onclick = signOut;
-    if (sts) { sts.textContent = '✅ Connected to Google Drive'; sts.style.color = 'var(--green)'; }
+    if (sts) { sts.textContent = '✅ Drive connected'; sts.style.color = 'var(--green)'; }
   } else {
-    btn.textContent = '🔑 Sign in with Google'; btn.onclick = signIn;
-    if (sts) { sts.textContent = '⚠️ Sign in to sync data'; sts.style.color = 'var(--yellow)'; }
+    btn.textContent = '🔑 Sign in'; btn.onclick = signIn;
+    if (sts) { sts.textContent = '⚠️ Not signed in'; sts.style.color = 'var(--yellow)'; }
   }
 }
 function showStatus(msg, color) {
@@ -134,6 +134,7 @@ function signIn() {
   window._gisClient.requestAccessToken();
 }
 function signOut() {
+  if (_unsavedChanges && !confirm('You have unsaved changes. Sign out anyway? Your changes will be lost.')) return;
   if (_accessToken) google.accounts.oauth2.revoke(_accessToken, () => {});
   _accessToken = null; _signedIn = false; _folderId = null; _fileId = null;
   clearSession();
@@ -242,7 +243,7 @@ async function driveSave() {
       _fileId = (await res.json()).id;
       sessionStorage.setItem(SS_FILE, _fileId);
     }
-    showStatus(`✅ Saved to Google Drive — ${new Date().toLocaleTimeString()}`, 'var(--green)');
+    _unsavedChanges = false; _lastSaveTime = Date.now(); showStatus(`✅ Saved to Google Drive — ${new Date().toLocaleTimeString()}`, 'var(--green)');
     return true;
   } catch(e) {
     console.error('driveSave:', e);
@@ -289,15 +290,15 @@ function loadAssetsMaster()      { return _db.assets_master      || []; }
 function loadAssetValues()       { return _db.asset_values       || []; }
 function loadInvestmentData()    { return _db.investment_data    || []; }
 
-function saveFinanceRecords(arr)    { _db.finance_records    = arr; }
+function saveFinanceRecords(arr)    { _db.finance_records    = arr; markUnsaved(); }
 function getProfileRecords() { return (_db.finance_records||[]).filter(r=>r.profile===getActiveProfile()||!r.profile); }
-function saveCategories(arr)        { _db.finance_categories = arr; }
+function saveCategories(arr)        { _db.finance_categories = arr; markUnsaved(); }
 function saveUselessExpenses(arr)   { _db.useless_expenses   = arr; }
-function saveStockTransactions(arr) { _db.stock_transactions = arr; }
-function saveStockPrices(arr)       { _db.stock_prices       = arr; }
-function saveAssetsMaster(arr)      { _db.assets_master      = arr; }
-function saveAssetValues(arr)       { _db.asset_values       = arr; }
-function saveInvestmentData(arr)    { _db.investment_data    = arr; }
+function saveStockTransactions(arr) { _db.stock_transactions = arr; markUnsaved(); }
+function saveStockPrices(arr)       { _db.stock_prices       = arr; markUnsaved(); }
+function saveAssetsMaster(arr)      { _db.assets_master      = arr; markUnsaved(); }
+function saveAssetValues(arr)       { _db.asset_values       = arr; markUnsaved(); }
+function saveInvestmentData(arr)    { _db.investment_data    = arr; markUnsaved(); }
 
 // ── Excel export ──────────────────────────────────────────
 function exportToExcel(sheets) {
@@ -365,6 +366,37 @@ function seedCategories(year = 2024) {
   _db.finance_categories = rows;
   return rows;
 }
+
+
+// ── Auto-save & unsaved change tracking ──────────────────
+let _unsavedChanges = false;
+let _lastSaveTime   = Date.now();
+let _autoSaveTimer  = null;
+const AUTO_SAVE_INTERVAL = 10 * 60 * 1000; // 10 minutes
+
+function markUnsaved() {
+  _unsavedChanges = true;
+  // Reset auto-save countdown from last change
+  if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(async () => {
+    if (_unsavedChanges && _signedIn) {
+      showStatus('⏳ Auto-saving…');
+      await driveSave();
+      _unsavedChanges = false;
+    }
+  }, AUTO_SAVE_INTERVAL);
+  // Update status indicator
+  showStatus('● Unsaved changes', 'var(--yellow)');
+}
+
+// Warn before tab/browser close if unsaved
+window.addEventListener('beforeunload', (e) => {
+  if (_unsavedChanges) {
+    e.preventDefault();
+    e.returnValue = 'You have unsaved changes. Save to Google Drive before leaving?';
+    return e.returnValue;
+  }
+});
 
 // ── Boot ──────────────────────────────────────────────────
 window.addEventListener('load', async () => {
