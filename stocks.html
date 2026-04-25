@@ -701,6 +701,21 @@ async function refreshFromDrive() {
   await loadFromDrive();
 }
 
+
+// ── Profile change handler ────────────────────────────────
+window.onProfileChange = function() {
+  // Clear all holdings display immediately
+  const ids = ['stockKPIs','holdingsTable','realizedTable','txTable','stockPerformance'];
+  ids.forEach(id => { const el=document.getElementById(id); if(el) el.innerHTML=''; });
+  // Reset chart
+  if(window.portfolioChart) { window.portfolioChart.destroy(); window.portfolioChart=null; }
+  window.chartDataCache = null;
+  const cw = document.getElementById('chartWrap');
+  const cl = document.getElementById('chartLoading');
+  if(cw) cw.style.display='none';
+  if(cl) { cl.style.display='block'; cl.textContent='Click "📈 Fetch Prices" first, then the chart will appear here.'; }
+};
+
 window.onDataLoaded = function() { render(); buildPortfolioChart(); };
 </script>
 </body>
