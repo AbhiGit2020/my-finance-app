@@ -35,7 +35,7 @@
 </nav>
 
 <div class="page">
-  <div class="page-title">💰 Personal Finance Input</div>
+  <div class="page-title">📒 Finance Input</div>
 
   <!-- Controls row -->
   <div class="flex flex-gap flex-center mb-16 flex-wrap">
@@ -46,8 +46,8 @@
     <div class="form-group">
       <label>Section</label>
       <div class="flex flex-gap" style="gap:8px">
-        <button id="btnIncoming" class="btn btn-primary" onclick="setSection('incoming')">Incoming</button>
-        <button id="btnOutgoing" class="btn btn-secondary" onclick="setSection('outgoing')">Outgoing</button>
+        <button id="btnIncoming" class="btn btn-primary" onclick="setSection('incoming')">💰 Incoming</button>
+        <button id="btnOutgoing" class="btn btn-secondary" onclick="setSection('outgoing')">💸 Expenses</button>
       </div>
     </div>
     <div style="margin-left:auto; display:flex; gap:8px; align-items:flex-end">
@@ -68,13 +68,13 @@
         <div class="form-group" id="groupDiv">
           <label>Group</label>
           <select id="newCatGroup" class="input-md">
-            <option>Living</option><option>Insurance</option><option>Taxes</option><option>Investments</option>
+            <option>Living</option><option>Insurance</option><option>Taxes</option>
           </select>
         </div>
         <div class="form-group" id="typeDiv">
           <label>Type</label>
           <select id="newCatType" class="input-md">
-            <option value="expense">expense</option><option value="tax">tax</option><option value="investment">investment</option>
+            <option value="expense">expense</option><option value="tax">tax</option>
           </select>
         </div>
         <div class="form-group">
@@ -94,15 +94,20 @@
 
   <!-- Manage categories -->
   <details>
-    <summary>🧹 Manage Categories (Hide / Delete)</summary>
+    <summary>🧹 Manage Categories (Rename / Hide / Delete)</summary>
     <div class="details-content">
       <div class="form-row">
         <div class="form-group" style="flex:1">
           <label>Category</label>
-          <select id="manageCatSel" class="wide"></select>
+          <select id="manageCatSel" class="wide" onchange="onManageCatChange()"></select>
+        </div>
+        <div class="form-group" style="flex:2">
+          <label>Rename to</label>
+          <input type="text" id="renameCatInput" class="input-lg" placeholder="New name…">
         </div>
         <div class="form-group" style="justify-content:flex-end; gap:8px; flex-direction:row; align-items:flex-end">
-          <button class="btn btn-secondary" onclick="hideCategory()">🙈 Hide / Retire</button>
+          <button class="btn btn-secondary" onclick="renameCategory()">✏️ Rename</button>
+          <button class="btn btn-secondary" onclick="hideCategory()">🙈 Retire</button>
           <button class="btn btn-danger" onclick="deleteCategory()">🗑️ Delete</button>
         </div>
       </div>
@@ -158,7 +163,7 @@
   <!-- Discretionary tracker (outgoing only) -->
   <div id="discSection" class="hidden">
     <hr class="divider">
-    <div class="section-title mb-16">🛍️ Discretionary / Useless Expense Tracker</div>
+    <div class="section-title mb-16">🛍️ Discretionary Expense Tracker</div>
     <p class="text-muted mb-16" style="font-size:0.84rem">Track avoidable or low-value expenses. These are NOT included in outgoing totals.</p>
 
     <div class="panel">
@@ -237,6 +242,7 @@ function getActiveCats() {
   return loadCategories().filter(c =>
     c.section === currentSection &&
     c.active &&
+    c.type !== 'investment' &&
     c.start_year <= y &&
     (c.end_year === null || c.end_year === undefined || c.end_year >= y)
   ).sort((a,b) => {
@@ -272,7 +278,7 @@ function renderPivot() {
   html += '<th>YTD</th></tr></thead><tbody>';
 
   if(currentSection==='outgoing') {
-    const GO = {Living:1,Insurance:2,Taxes:3,Investments:4};
+    const GO = {Living:1,Insurance:2,Taxes:3};
     const sortedGroups = [...new Set(cats.map(c=>c.group))].sort((a,b)=>(GO[a]||99)-(GO[b]||99));
     sortedGroups.forEach(grp => {
       const grpCats = cats.filter(c=>c.group===grp);
@@ -338,6 +344,9 @@ function renderManageSel() {
   const sel = document.getElementById('manageCatSel');
   const cats = getActiveCats();
   sel.innerHTML = cats.map(c=>`<option value="${c.category}">${c.category}</option>`).join('');
+  // Pre-fill rename input with current selection
+  const renameEl = document.getElementById('renameCatInput');
+  if (renameEl && cats.length) renameEl.value = cats[0].category;
 }
 
 function renderCalcCat() {
@@ -499,6 +508,32 @@ function deleteCategory() {
   saveCategories(cats); saveFinanceRecords(recs);
   loadPivot(); renderAll();
   toast(`Deleted: ${name}`, 'info');
+}
+
+function onManageCatChange() {
+  const name = document.getElementById('manageCatSel').value;
+  document.getElementById('renameCatInput').value = name;
+}
+
+function renameCategory() {
+  const oldName = document.getElementById('manageCatSel').value;
+  const newName = document.getElementById('renameCatInput').value.trim();
+  if (!newName) { toast('New name cannot be empty', 'error'); return; }
+  if (newName === oldName) { toast('Name is the same', 'error'); return; }
+  const cats = loadCategories();
+  if (cats.find(c => c.category.toLowerCase() === newName.toLowerCase() && c.section === currentSection)) {
+    toast('A category with that name already exists', 'error'); return;
+  }
+  // Rename in categories
+  const cat = cats.find(c => c.category === oldName);
+  if (!cat) { toast('Category not found', 'error'); return; }
+  cat.category = newName;
+  saveCategories(cats);
+  // Rename in all finance records
+  let recs = loadFinanceRecords().map(r => r.category === oldName ? {...r, category: newName} : r);
+  saveFinanceRecords(recs);
+  loadPivot(); renderAll();
+  toast(`Renamed: "${oldName}" → "${newName}"`);
 }
 
 // ── Calculator helper ─────────────────────────────────────

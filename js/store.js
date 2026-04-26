@@ -352,17 +352,6 @@ function seedCategories(year = 2024) {
   add('outgoing','Insurance','expense','Insurance - 2',2);
   add('outgoing','Taxes','tax','Income Tax',1);
   add('outgoing','Taxes','tax','Personal Tax',2);
-  add('outgoing','Investments','investment','Manulife Regular Insurance Plan',1);
-  add('outgoing','Investments','investment','Manulife Ready Builder 10',2);
-  add('outgoing','Investments','investment','Manulife Ready - 8',3);
-  add('outgoing','Investments','investment','DBS STI Unit Trust',4);
-  add('outgoing','Investments','investment','SYFE Equity 100 - ABHI',5);
-  add('outgoing','Investments','investment','SYFE Equities 100 - KIARA',6);
-  add('outgoing','Investments','investment','SYFE SG Stocks',7);
-  add('outgoing','Investments','investment','IBKR Equities - ABHI',8);
-  add('outgoing','Investments','investment','IBKR Equities - KIARA',9);
-  add('outgoing','Investments','investment','SRS Endowus',10);
-  add('outgoing','Investments','investment','SYFE REITS',11);
   _db.finance_categories = rows;
   return rows;
 }
