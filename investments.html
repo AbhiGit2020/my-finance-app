@@ -27,7 +27,7 @@
       
       <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">🔑 Sign in</button>
       <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">🔄</button>
-      <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
+      <button class="btn btn-sm btn-teal" onclick="saveInvestments()" title="Save to Drive">☁ Save</button>
       <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">💾</button>
       <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
     </div>
@@ -50,7 +50,6 @@
       </select>
     </div>
     <div style="margin-left:auto;display:flex;gap:8px;align-items:flex-end">
-      <button class="btn btn-primary" onclick="saveInvestments()">💾 Save</button>
       <button class="btn btn-secondary" onclick="exportInvExcel()">⬇ Export Excel</button>
     </div>
   </div>
@@ -356,7 +355,7 @@ function saveInvestments(){
     });
   });
   saveInvestmentData(stored);
-  toast('Investments saved ✓');
+  driveSync().then(ok => toast(ok ? '✅ Investments saved to Drive' : 'Saved locally (sign in to sync)'));
 }
 
 // ── Add / Manage investments ──────────────────────────────

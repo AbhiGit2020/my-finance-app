@@ -27,7 +27,7 @@
       
       <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">🔑 Sign in</button>
       <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">🔄</button>
-      <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
+      <button class="btn btn-sm btn-teal" onclick="savePivot()" title="Save to Drive">☁ Save</button>
       <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">💾</button>
       <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
     </div>
@@ -51,7 +51,6 @@
       </div>
     </div>
     <div style="margin-left:auto; display:flex; gap:8px; align-items:flex-end">
-      <button class="btn btn-primary" onclick="savePivot()">💾 Save</button>
       <button class="btn btn-secondary" onclick="exportSectionExcel()">⬇ Export Section</button>
     </div>
   </div>
@@ -463,7 +462,7 @@ function savePivot() {
   });
   saveFinanceRecords(records);
   renderHistTable();
-  driveSync().then(ok => toast(ok ? 'Saved to Drive ✓' : 'Saved locally (sign in to sync)'));
+  driveSync().then(ok => toast(ok ? '✅ Saved to Drive' : 'Saved locally (sign in to sync)'));
 
 }
 
