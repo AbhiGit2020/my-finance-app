@@ -92,19 +92,25 @@ function fmtPct(n) { return Number(n||0).toFixed(1) + '%'; }
 
 function getYears() {
   const recs = loadFinanceRecords();
-  const years = [...new Set(recs.map(r=>r.year))].sort();
+  const invRecs = loadInvestmentData();
+  const years = [...new Set([
+    ...recs.map(r=>r.year),
+    ...invRecs.map(r=>r.year)
+  ])].filter(Boolean).sort();
   return years;
 }
 
 function getAnnualTotals(year) {
-  const recs = loadFinanceRecords().filter(r=>r.year===year);
-  const cats = loadCategories();
-  let income=0, outgoing=0, invested=0;
+  // Income and expenses from finance records
+  const recs = loadFinanceRecords().filter(r => r.year === year);
+  let income=0, outgoing=0;
   recs.forEach(r => {
     if(r.type==='income') income += r.amount;
-    else if(r.type==='expense'||r.type==='tax') outgoing += r.amount;
-    else if(r.type==='investment') invested += r.amount;
+    else if(r.type==='expense' || r.type==='tax') outgoing += r.amount;
   });
+  // Investments from investment data (monthly_investment rows only)
+  const invRecs = loadInvestmentData().filter(r => r.year === year && r.metric === 'monthly_investment');
+  const invested = invRecs.reduce((s,r) => s + (parseFloat(r.amount)||0), 0);
   return { income, outgoing, invested, savings: income - outgoing - invested };
 }
 
@@ -132,7 +138,7 @@ function render() {
       <div class="lkpi-sub">Across ${years.length} year${years.length>1?'s':''} (${years[0]}–${years[years.length-1]})</div>
     </div>
     <div class="lkpi" style="border-color:var(--red)">
-      <div class="lkpi-label">Lifetime Outgoing</div>
+      <div class="lkpi-label">Lifetime Expenses</div>
       <div class="lkpi-value" style="color:var(--red)">S$ ${fmt(ltOutgoing)}</div>
       <div class="lkpi-sub">${fmtPct(ltIncome>0?ltOutgoing/ltIncome*100:0)} of total income</div>
     </div>
@@ -182,7 +188,7 @@ function render() {
       labels: years,
       datasets: [
         { label:'Income',   data:incomes,   backgroundColor:'rgba(6,138,145,0.75)',  borderRadius:4 },
-        { label:'Outgoing', data:outgoings, backgroundColor:'rgba(248,81,73,0.65)',  borderRadius:4 },
+        { label:'Expenses', data:outgoings, backgroundColor:'rgba(248,81,73,0.65)',  borderRadius:4 },
         { label:'Invested', data:investeds, backgroundColor:'rgba(210,153,34,0.65)', borderRadius:4 },
         { label:'Savings',  data:savings,   backgroundColor:'rgba(63,185,80,0.65)',  borderRadius:4 },
       ]
@@ -260,11 +266,12 @@ function renderDrill(year) {
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   // Monthly income/outgoing
+  const invMonthly = loadInvestmentData().filter(r=>r.year===year&&r.metric==='monthly_investment');
   const monthly = MONTHS.map((_,i)=>{
     const m = i+1;
     const inc = recs.filter(r=>r.month===m&&r.type==='income').reduce((s,r)=>s+r.amount,0);
     const out = recs.filter(r=>r.month===m&&(r.type==='expense'||r.type==='tax')).reduce((s,r)=>s+r.amount,0);
-    const inv = recs.filter(r=>r.month===m&&r.type==='investment').reduce((s,r)=>s+r.amount,0);
+    const inv = invMonthly.filter(r=>r.month===m).reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
     const sav = inc - out - inv;
     const savPct = inc>0?(sav/inc*100):0;
     return {inc,out,inv,sav,savPct};
@@ -298,7 +305,7 @@ function renderDrill(year) {
             <td style="padding:7px 10px;text-align:right;font-weight:700">${fmt(t.income)}</td>
           </tr>
           <tr>
-            <td style="padding:7px 10px;font-weight:600">Outgoing</td>
+            <td style="padding:7px 10px;font-weight:600">Expenses</td>
             ${monthly.map(m=>`<td style="padding:7px 10px;text-align:right;color:var(--red)">${fmt(m.out)}</td>`).join('')}
             <td style="padding:7px 10px;text-align:right;font-weight:700;color:var(--red)">${fmt(t.outgoing)}</td>
           </tr>
