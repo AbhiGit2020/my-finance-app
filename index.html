@@ -127,36 +127,77 @@ function render() {
     const t = getAnnualTotals(y);
     ltIncome += t.income; ltOutgoing += t.outgoing; ltInvested += t.invested;
   });
-  const ltSavings = ltIncome - ltOutgoing - ltInvested;
-  const ltSavRate = ltIncome > 0 ? (ltSavings/ltIncome*100) : 0;
-  const ltInvRate = ltIncome > 0 ? (ltInvested/ltIncome*100) : 0;
+  const numYears = years.length || 1;
+  const avgIncome  = ltIncome  / numYears;
+  const avgExpense = ltOutgoing / numYears;
+  const avgExpPct  = avgIncome > 0 ? (avgExpense/avgIncome*100) : 0;
+  const ltInvRate  = avgIncome > 0 ? (ltInvested/ltIncome*100) : 0;
+
+  // Current investment market value (latest market_value per investment)
+  const allInvData = loadInvestmentData().filter(r => r.metric === 'market_value');
+  const latestMV = {};
+  allInvData.sort((a,b)=>a.year!==b.year?a.year-b.year:a.month-b.month).forEach(r=>{
+    latestMV[r.category] = parseFloat(r.amount)||0;
+  });
+  const currentInvValue = Object.values(latestMV).reduce((s,v)=>s+v,0);
+  const investedTotal = ltInvested;
+  const invGainLoss = currentInvValue - investedTotal;
+  const invGainPct = investedTotal > 0 ? (invGainLoss/investedTotal*100) : 0;
+
+  // Assets by type (latest value)
+  const assets = loadAssetsMaster().filter(a=>a.active);
+  const assetVals = loadAssetValues();
+  function latestAssetVal(assetId) {
+    const vals = assetVals.filter(v=>v.asset_id===assetId);
+    if(!vals.length) return 0;
+    const sorted = [...vals].sort((a,b)=>new Date(b.date)-new Date(a.date));
+    return parseFloat(sorted[0].value_sgd)||0;
+  }
+  const ASSET_GROUPS = {
+    'Property':           ['Property'],
+    'Retirement':         ['Retirement Fund'],
+    'CPF':                ['Provident Fund'],
+    'Gold':               ['Gold'],
+    'Medical':            ['Medical Fund'],
+    'Other':              ['Other Non-Liquid','Other'],
+  };
+  const assetTotals = {};
+  Object.keys(ASSET_GROUPS).forEach(g => assetTotals[g] = 0);
+  assets.forEach(a => {
+    const val = latestAssetVal(a.asset_id);
+    const group = Object.entries(ASSET_GROUPS).find(([,types])=>types.includes(a.asset_type));
+    if(group) assetTotals[group[0]] += val;
+  });
+  const totalNetWorth = Object.values(assetTotals).reduce((s,v)=>s+v,0) + currentInvValue;
 
   document.getElementById('lifetimeKPIs').innerHTML = `
     <div class="lkpi" style="border-color:var(--teal)">
-      <div class="lkpi-label">Lifetime Income</div>
-      <div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(ltIncome)}</div>
-      <div class="lkpi-sub">Across ${years.length} year${years.length>1?'s':''} (${years[0]}–${years[years.length-1]})</div>
+      <div class="lkpi-label">Avg Annual Income</div>
+      <div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(avgIncome)}</div>
+      <div class="lkpi-sub">${years.length} yr${years.length>1?'s':''} tracked (${years[0]}–${years[years.length-1]})</div>
     </div>
     <div class="lkpi" style="border-color:var(--red)">
-      <div class="lkpi-label">Lifetime Expenses</div>
-      <div class="lkpi-value" style="color:var(--red)">S$ ${fmt(ltOutgoing)}</div>
-      <div class="lkpi-sub">${fmtPct(ltIncome>0?ltOutgoing/ltIncome*100:0)} of total income</div>
+      <div class="lkpi-label">Avg Annual Expenses</div>
+      <div class="lkpi-value" style="color:var(--red)">S$ ${fmt(avgExpense)}</div>
+      <div class="lkpi-sub">${fmtPct(avgExpPct)} of avg income</div>
     </div>
     <div class="lkpi" style="border-color:var(--yellow)">
-      <div class="lkpi-label">Lifetime Invested</div>
-      <div class="lkpi-value" style="color:var(--yellow)">S$ ${fmt(ltInvested)}</div>
-      <div class="lkpi-sub">${fmtPct(ltInvRate)} of total income</div>
+      <div class="lkpi-label">Total Invested</div>
+      <div class="lkpi-value" style="color:var(--yellow)">S$ ${fmt(investedTotal)}</div>
+      <div class="lkpi-sub">${fmtPct(ltInvRate)} of lifetime income</div>
     </div>
-    <div class="lkpi" style="border-color:var(--green)">
-      <div class="lkpi-label">Lifetime Net Savings</div>
-      <div class="lkpi-value" style="color:var(--green)">S$ ${fmt(ltSavings)}</div>
-      <div class="lkpi-sub">Avg savings rate ${fmtPct(ltSavRate)}</div>
+    <div class="lkpi" style="border-color:${invGainLoss>=0?'var(--green)':'var(--red)'}">
+      <div class="lkpi-label">Current Investment Value</div>
+      <div class="lkpi-value" style="color:${invGainLoss>=0?'var(--green)':'var(--red)'}">S$ ${fmt(currentInvValue)}</div>
+      <div class="lkpi-sub" style="color:${invGainLoss>=0?'var(--green)':'var(--red)'}">${invGainLoss>=0?'▲':'▼'} S$ ${fmt(Math.abs(invGainLoss))} (${fmtPct(Math.abs(invGainPct))})</div>
     </div>
-    <div class="lkpi">
-      <div class="lkpi-label">Years Tracked</div>
-      <div class="lkpi-value" style="color:var(--text)">${years.length}</div>
-      <div class="lkpi-sub">${years.join(', ')}</div>
-    </div>
+    ${assetTotals['Property']>0?`<div class="lkpi"><div class="lkpi-label">Property</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Property'])}</div></div>`:''}
+    ${assetTotals['Retirement']>0?`<div class="lkpi"><div class="lkpi-label">Retirement Funds</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Retirement'])}</div></div>`:''}
+    ${assetTotals['CPF']>0?`<div class="lkpi"><div class="lkpi-label">CPF Accounts</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['CPF'])}</div></div>`:''}
+    ${assetTotals['Gold']>0?`<div class="lkpi"><div class="lkpi-label">Gold</div><div class="lkpi-value" style="color:var(--yellow)">S$ ${fmt(assetTotals['Gold'])}</div></div>`:''}
+    ${assetTotals['Medical']>0?`<div class="lkpi"><div class="lkpi-label">Medisave / Medical</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Medical'])}</div></div>`:''}
+    ${assetTotals['Other']>0?`<div class="lkpi"><div class="lkpi-label">Other Assets</div><div class="lkpi-value" style="color:var(--text-muted)">S$ ${fmt(assetTotals['Other'])}</div></div>`:''}
+    ${totalNetWorth>0?`<div class="lkpi" style="border-color:var(--teal)"><div class="lkpi-label">Est. Net Worth</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(totalNetWorth)}</div><div class="lkpi-sub">Investments + Assets</div></div>`:''}
   `;
 
   // Chart data

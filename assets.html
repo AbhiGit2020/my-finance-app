@@ -72,8 +72,13 @@
         <div class="form-group">
           <label>Type</label>
           <select id="newAssetType" class="input-md">
-            <option>Provident Fund</option><option>Retirement Fund</option><option>Property</option>
-            <option>Gold</option><option>Other Non-Liquid</option><option>Other</option>
+            <option>Property</option>
+            <option>Provident Fund</option>
+            <option>Retirement Fund</option>
+            <option>Gold</option>
+            <option>Medical Fund</option>
+            <option>Other Non-Liquid</option>
+            <option>Other</option>
           </select>
         </div>
         <div class="form-group">
@@ -251,7 +256,7 @@ function render(){
   thtml+='<th>Latest</th></tr></thead><tbody>';
 
   active.sort((a,b)=>{
-    const typeOrder={'Provident Fund':1,'Retirement Fund':2,'Property':3,'Gold':4,'Other Non-Liquid':5,'Other':6};
+    const typeOrder={'Property':1,'Provident Fund':2,'Retirement Fund':3,'Medical Fund':4,'Gold':5,'Other Non-Liquid':6,'Other':7};
     return (typeOrder[a.asset_type]||9)-(typeOrder[b.asset_type]||9)||(a.asset_name>b.asset_name?1:-1);
   }).forEach(asset=>{
     const yearVals=allVals.filter(v=>v.asset_id===asset.asset_id&&v.year===year);
