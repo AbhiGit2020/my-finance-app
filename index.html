@@ -170,11 +170,44 @@ function render() {
   });
   const totalNetWorth = Object.values(assetTotals).reduce((s,v)=>s+v,0) + currentInvValue;
 
+  // Stocks — all profiles
+  const allProfiles = ['Abhi','Wife','Kids','Joint'];
+  let totalStockValue = 0, totalUnrealized = 0;
+  allProfiles.forEach(prof => {
+    const ptxns = loadStockTransactions().filter(r=>r.profile===prof);
+    const prices = loadStockPrices().filter(p=>p.profile===prof);
+    const priceMap = {};
+    prices.forEach(p=>priceMap[p.ticker]=p);
+    if(!ptxns.length) return;
+    // compute holdings
+    const positions = {};
+    [...ptxns].sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(t=>{
+      if(!positions[t.ticker]) positions[t.ticker]={qty:0,cost:0};
+      const qty=parseFloat(t.qty)||0, price=parseFloat(t.price)||0;
+      if(t.action==='BUY'){positions[t.ticker].qty+=qty;positions[t.ticker].cost+=qty*price;}
+      else{const avg=positions[t.ticker].qty?positions[t.ticker].cost/positions[t.ticker].qty:0;positions[t.ticker].qty-=qty;positions[t.ticker].cost-=qty*avg;}
+    });
+    Object.entries(positions).forEach(([ticker,pos])=>{
+      if(pos.qty<=0) return;
+      const p=priceMap[ticker];
+      if(!p) return;
+      const close=parseFloat(p.close)||0;
+      const mv=pos.qty*close;
+      const avgCost=pos.qty?pos.cost/pos.qty:0;
+      totalStockValue+=mv;
+      totalUnrealized+=(close-avgCost)*pos.qty;
+    });
+  });
+
+  // All assets total
+  const totalAssetValue = Object.values(assetTotals).reduce((s,v)=>s+v,0);
+  const estNetWorth = totalStockValue + currentInvValue + totalAssetValue;
+
   document.getElementById('lifetimeKPIs').innerHTML = `
     <div class="lkpi" style="border-color:var(--teal)">
       <div class="lkpi-label">Avg Annual Income</div>
       <div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(avgIncome)}</div>
-      <div class="lkpi-sub">${years.length} yr${years.length>1?'s':''} tracked (${years[0]}–${years[years.length-1]})</div>
+      <div class="lkpi-sub">${years.length} yr${years.length>1?'s':''} · ${years[0]}–${years[years.length-1]}</div>
     </div>
     <div class="lkpi" style="border-color:var(--red)">
       <div class="lkpi-label">Avg Annual Expenses</div>
@@ -187,17 +220,25 @@ function render() {
       <div class="lkpi-sub">${fmtPct(ltInvRate)} of lifetime income</div>
     </div>
     <div class="lkpi" style="border-color:${invGainLoss>=0?'var(--green)':'var(--red)'}">
-      <div class="lkpi-label">Current Investment Value</div>
+      <div class="lkpi-label">Investment Market Value</div>
       <div class="lkpi-value" style="color:${invGainLoss>=0?'var(--green)':'var(--red)'}">S$ ${fmt(currentInvValue)}</div>
-      <div class="lkpi-sub" style="color:${invGainLoss>=0?'var(--green)':'var(--red)'}">${invGainLoss>=0?'▲':'▼'} S$ ${fmt(Math.abs(invGainLoss))} (${fmtPct(Math.abs(invGainPct))})</div>
+      <div class="lkpi-sub" style="color:${invGainLoss>=0?'var(--green)':'var(--red)'}">${invGainLoss>=0?'▲':'▼'} ${fmtPct(Math.abs(invGainPct))} vs invested</div>
+    </div>
+    <div class="lkpi" style="border-color:var(--teal)">
+      <div class="lkpi-label">Stock Portfolio (All)</div>
+      <div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(totalStockValue)}</div>
+      <div class="lkpi-sub" style="color:${totalUnrealized>=0?'var(--green)':'var(--red)'}">${totalUnrealized>=0?'▲':'▼'} S$ ${fmt(Math.abs(totalUnrealized))} unrealized</div>
     </div>
     ${assetTotals['Property']>0?`<div class="lkpi"><div class="lkpi-label">Property</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Property'])}</div></div>`:''}
-    ${assetTotals['Retirement']>0?`<div class="lkpi"><div class="lkpi-label">Retirement Funds</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Retirement'])}</div></div>`:''}
-    ${assetTotals['CPF']>0?`<div class="lkpi"><div class="lkpi-label">CPF Accounts</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['CPF'])}</div></div>`:''}
+    ${assetTotals['CPF']>0?`<div class="lkpi"><div class="lkpi-label">CPF</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['CPF'])}</div></div>`:''}
+    ${assetTotals['Retirement']>0?`<div class="lkpi"><div class="lkpi-label">Retirement</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Retirement'])}</div></div>`:''}
+    ${assetTotals['Medical']>0?`<div class="lkpi"><div class="lkpi-label">Medisave</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Medical'])}</div></div>`:''}
     ${assetTotals['Gold']>0?`<div class="lkpi"><div class="lkpi-label">Gold</div><div class="lkpi-value" style="color:var(--yellow)">S$ ${fmt(assetTotals['Gold'])}</div></div>`:''}
-    ${assetTotals['Medical']>0?`<div class="lkpi"><div class="lkpi-label">Medisave / Medical</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Medical'])}</div></div>`:''}
-    ${assetTotals['Other']>0?`<div class="lkpi"><div class="lkpi-label">Other Assets</div><div class="lkpi-value" style="color:var(--text-muted)">S$ ${fmt(assetTotals['Other'])}</div></div>`:''}
-    ${totalNetWorth>0?`<div class="lkpi" style="border-color:var(--teal)"><div class="lkpi-label">Est. Net Worth</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(totalNetWorth)}</div><div class="lkpi-sub">Investments + Assets</div></div>`:''}
+    <div class="lkpi" style="border-color:var(--green);background:rgba(63,185,80,0.06)">
+      <div class="lkpi-label">Est. Net Worth</div>
+      <div class="lkpi-value" style="color:var(--green)">S$ ${fmt(estNetWorth)}</div>
+      <div class="lkpi-sub">Stocks + Investments + Assets</div>
+    </div>
   `;
 
   // Chart data
