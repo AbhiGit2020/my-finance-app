@@ -233,7 +233,7 @@ function render(){
 
   // Manage select
   const active=assets.filter(a=>a.active);
-  document.getElementById('manageAssetSel').innerHTML=assets.map(a=>`<option>${a.asset_name}</option>`).join('');
+  document.getElementById('manageAssetSel').innerHTML=assets.map(a=>`<option>${escapeHtml(a.asset_name)}</option>`).join('');
 
   // Net Worth KPIs
   const totalLatest=active.reduce((s,a)=>{const{value}=latestValue(a.asset_id);return s+(value||0);},0);
@@ -243,7 +243,7 @@ function render(){
     const typeAssets=active.filter(a=>a.asset_type===type);
     const typeTotal=typeAssets.reduce((s,a)=>{const{value}=latestValue(a.asset_id);return s+(value||0);},0);
     const pct=totalLatest>0?((typeTotal/totalLatest)*100).toFixed(0):0;
-    kpiHTML+=`<div class="kpi"><div class="kpi-label">${type}</div><div class="kpi-value neutral">S$ ${fmt(typeTotal)}</div><div class="text-muted mt-4" style="font-size:0.78rem">${pct}% of total</div></div>`;
+    kpiHTML+=`<div class="kpi"><div class="kpi-label">${escapeHtml(type)}</div><div class="kpi-value neutral">S$ ${fmt(typeTotal)}</div><div class="text-muted mt-4" style="font-size:0.78rem">${pct}% of total</div></div>`;
   });
   document.getElementById('nwKPIs').innerHTML=kpiHTML;
 
@@ -266,7 +266,7 @@ function render(){
       return Math.max(...monthVals.map(v=>parseFloat(v.value_sgd)||0));
     });
     const {value:latestVal}=latestValue(asset.asset_id);
-    thtml+=`<tr><td class="bold">${asset.asset_name}</td><td class="text-muted">${asset.asset_type}</td><td class="text-muted">${asset.owner}</td>`;
+    thtml+=`<tr><td class="bold">${escapeHtml(asset.asset_name)}</td><td class="text-muted">${escapeHtml(asset.asset_type)}</td><td class="text-muted">${escapeHtml(asset.owner)}</td>`;
     monthly.forEach(v=>thtml+=`<td class="${v?'':'text-muted'}">${v!==null?fmt(v):'—'}</td>`);
     thtml+=`<td class="bold">${latestVal!==null?fmt(latestVal):'—'}</td></tr>`;
   });
@@ -301,12 +301,12 @@ function render(){
     boxHTML+=`<div class="asset-card">
       <div class="asset-card-header">
         <div>
-          <div class="bold" style="font-size:1.05rem">${asset.asset_name}</div>
-          <div class="asset-card-meta">${asset.asset_type} | ${asset.owner}${asset.notes?` — ${asset.notes}`:''}</div>
+          <div class="bold" style="font-size:1.05rem">${escapeHtml(asset.asset_name)}</div>
+          <div class="asset-card-meta">${escapeHtml(asset.asset_type)} | ${escapeHtml(asset.owner)}${asset.notes?` — ${escapeHtml(asset.notes)}`:''}</div>
         </div>
         <div class="asset-kpi-pair">
           <div class="asset-kpi-sm"><div class="asset-kpi-sm-label">Latest Value (SGD)</div><div class="asset-kpi-sm-value">${latestVal!==null?fmt(latestVal):'—'}</div></div>
-          <div class="asset-kpi-sm"><div class="asset-kpi-sm-label">Last Updated</div><div class="asset-kpi-sm-value" style="font-size:0.9rem">${latestDate||'—'}</div></div>
+          <div class="asset-kpi-sm"><div class="asset-kpi-sm-label">Last Updated</div><div class="asset-kpi-sm-value" style="font-size:0.9rem">${escapeHtml(latestDate||'—')}</div></div>
         </div>
       </div>
 
@@ -314,10 +314,10 @@ function render(){
       <div class="panel mb-8">
         <div class="bold mb-8" style="font-size:0.88rem">Add Valuation</div>
         <div class="form-row">
-          <div class="form-group"><label>Date</label><input type="date" id="vd_${asset.asset_id}" class="input-md" value="${new Date().toISOString().slice(0,10)}"></div>
-          <div class="form-group"><label>Value (SGD)</label><input type="number" id="va_${asset.asset_id}" class="input-md" min="0" step="100" value="0"></div>
-          <div class="form-group" style="flex:2"><label>Note</label><input type="text" id="vn_${asset.asset_id}" class="input-lg" placeholder="e.g. annual statement, bank balance"></div>
-          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addValuation('${asset.asset_id}','${asset.asset_name}')">Add</button></div>
+          <div class="form-group"><label>Date</label><input type="date" id="vd_${escapeAttr(asset.asset_id)}" class="input-md" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div class="form-group"><label>Value (SGD)</label><input type="number" id="va_${escapeAttr(asset.asset_id)}" class="input-md" min="0" step="100" value="0"></div>
+          <div class="form-group" style="flex:2"><label>Note</label><input type="text" id="vn_${escapeAttr(asset.asset_id)}" class="input-lg" placeholder="e.g. annual statement, bank balance"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addValuation(${jsArg(asset.asset_id)},${jsArg(asset.asset_name)})">Add</button></div>
         </div>
       </div>
 
@@ -338,11 +338,11 @@ function render(){
             <thead><tr><th style="text-align:left;padding:6px 10px">Date</th><th style="padding:6px 10px">Value (SGD)</th><th style="text-align:left;padding:6px 10px">Note</th><th style="padding:6px 10px">Edit</th><th style="padding:6px 10px">Del</th></tr></thead>
             <tbody>${yearVals.map(v=>`
               <tr id="row_${v.valuation_id}">
-                <td style="padding:5px 10px"><input type="date" id="ed_${v.valuation_id}" value="${v.date}" class="input-sm" style="width:130px"></td>
-                <td style="padding:5px 10px"><input type="number" id="ea_${v.valuation_id}" value="${v.value_sgd}" min="0" step="100" class="input-sm" style="width:110px;text-align:right"></td>
-                <td style="padding:5px 10px"><input type="text" id="en_${v.valuation_id}" value="${v.note||''}" class="input-md" style="width:200px"></td>
-                <td style="padding:5px 8px"><button class="btn btn-secondary btn-sm" onclick="editValuationInline('${v.valuation_id}')">Save</button></td>
-                <td style="padding:5px 8px"><button class="btn btn-danger btn-sm" onclick="deleteValuation('${v.valuation_id}')">🗑</button></td>
+                <td style="padding:5px 10px"><input type="date" id="ed_${escapeAttr(v.valuation_id)}" value="${escapeAttr(v.date)}" class="input-sm" style="width:130px"></td>
+                <td style="padding:5px 10px"><input type="number" id="ea_${escapeAttr(v.valuation_id)}" value="${escapeAttr(v.value_sgd)}" min="0" step="100" class="input-sm" style="width:110px;text-align:right"></td>
+                <td style="padding:5px 10px"><input type="text" id="en_${escapeAttr(v.valuation_id)}" value="${escapeAttr(v.note||'')}" class="input-md" style="width:200px"></td>
+                <td style="padding:5px 8px"><button class="btn btn-secondary btn-sm" onclick="editValuationInline(${jsArg(v.valuation_id)})">Save</button></td>
+                <td style="padding:5px 8px"><button class="btn btn-danger btn-sm" onclick="deleteValuation(${jsArg(v.valuation_id)})">🗑</button></td>
               </tr>`).join('')}
             </tbody>
           </table>

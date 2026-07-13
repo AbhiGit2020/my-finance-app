@@ -295,7 +295,7 @@ function render(){
   rows.forEach(r=>{
     const pctCls=(v)=>v>0?'pos':v<0?'neg':'';
     html+=`<tr>
-      <td class="bold">${r.ticker}</td>
+      <td class="bold">${escapeHtml(r.ticker)}</td>
       <td>${fmt(r.qty,4)}</td><td>${fmt(r.avg_cost)}</td><td>${fmt(r.close)}</td>
       <td class="bold">${fmtN(r.market_value)}</td>
       <td class="${pctCls(r.unrealized_pnl)}">${fmt(r.unrealized_pnl)}</td>
@@ -304,7 +304,7 @@ function render(){
       <td class="${pctCls(r.monthly_pct)}">${fmt(r.monthly_pct,1)}%</td>
       <td class="${pctCls(r.ytd_pct)}">${fmt(r.ytd_pct,1)}%</td>
       <td class="${pctCls(r.total_return_pct)}">${fmt(r.total_return_pct,1)}%</td>
-      <td class="text-muted" style="font-size:0.8rem">${r.asof_date}</td>
+      <td class="text-muted" style="font-size:0.8rem">${escapeHtml(r.asof_date)}</td>
     </tr>`;
   });
   html+='</tbody>';
@@ -313,7 +313,7 @@ function render(){
   // Realized table
   let rHTML='<thead><tr><th>Ticker</th><th>Realized P&L</th><th>Open Qty</th></tr></thead><tbody>';
   if(!realRows.length) rHTML+='<tr><td colspan="3" class="text-muted" style="text-align:center;padding:14px">No realized gains/losses yet</td></tr>';
-  realRows.forEach(r=>{rHTML+=`<tr><td class="bold">${r.ticker}</td><td class="${r.realized_pnl>=0?'pos':'neg'}">${fmt(r.realized_pnl)}</td><td>${fmt(r.open_qty,4)}</td></tr>`;});
+  realRows.forEach(r=>{rHTML+=`<tr><td class="bold">${escapeHtml(r.ticker)}</td><td class="${r.realized_pnl>=0?'pos':'neg'}">${fmt(r.realized_pnl)}</td><td>${fmt(r.open_qty,4)}</td></tr>`;});
   rHTML+='</tbody>';
   document.getElementById('realizedTable').innerHTML=rHTML;
 
@@ -334,11 +334,11 @@ function renderTransactions(){
   if(!txns.length) html+='<tr><td colspan="7" class="text-muted" style="text-align:center;padding:16px">No transactions</td></tr>';
   txns.forEach(t=>{
     html+=`<tr>
-      <td>${t.date||''}</td>
-      <td class="bold">${t.ticker}</td>
+      <td>${escapeHtml(t.date||'')}</td>
+      <td class="bold">${escapeHtml(t.ticker)}</td>
       <td><span class="chip chip-${t.action==='BUY'?'buy':'sell'}">${t.action}</span></td>
       <td>${fmt(t.qty,4)}</td><td>${fmt(t.price)}</td>
-      <td>${t.currency||''}</td><td class="text-muted" style="text-align:left">${t.notes||''}</td>
+      <td>${escapeHtml(t.currency||'')}</td><td class="text-muted" style="text-align:left">${escapeHtml(t.notes||'')}</td>
     </tr>`;
   });
   html+='</tbody>';
@@ -377,14 +377,14 @@ function renderManualPriceForm(tickers){
   tickers.forEach(ticker=>{
     const p=prices.find(x=>x.ticker===ticker&&x.profile===profile())||{};
     html+=`<div class="panel mb-8">
-      <div class="bold mb-8">${ticker}</div>
+      <div class="bold mb-8">${escapeHtml(ticker)}</div>
       <div class="form-row">
-        <div class="form-group"><label>Close</label><input type="number" step="0.01" class="input-md" id="mp_close_${ticker}" value="${p.close||0}"></div>
-        <div class="form-group"><label>1-Wk Ref</label><input type="number" step="0.01" class="input-md" id="mp_wk_${ticker}" value="${p.wk_ref||0}"></div>
-        <div class="form-group"><label>1-Mo Ref</label><input type="number" step="0.01" class="input-md" id="mp_mo_${ticker}" value="${p.mo_ref||0}"></div>
-        <div class="form-group"><label>YTD Ref</label><input type="number" step="0.01" class="input-md" id="mp_ytd_${ticker}" value="${p.ytd_ref||0}"></div>
-        <div class="form-group"><label>As-Of Date</label><input type="date" class="input-md" id="mp_date_${ticker}" value="${p.asof_date||new Date().toISOString().slice(0,10)}"></div>
-        <div class="form-group" style="justify-content:flex-end"><button class="btn btn-secondary btn-sm" onclick="saveManualPrice('${ticker}')">Save</button></div>
+        <div class="form-group"><label>Close</label><input type="number" step="0.01" class="input-md" id="mp_close_${escapeAttr(ticker)}" value="${escapeAttr(p.close||0)}"></div>
+        <div class="form-group"><label>1-Wk Ref</label><input type="number" step="0.01" class="input-md" id="mp_wk_${escapeAttr(ticker)}" value="${escapeAttr(p.wk_ref||0)}"></div>
+        <div class="form-group"><label>1-Mo Ref</label><input type="number" step="0.01" class="input-md" id="mp_mo_${escapeAttr(ticker)}" value="${escapeAttr(p.mo_ref||0)}"></div>
+        <div class="form-group"><label>YTD Ref</label><input type="number" step="0.01" class="input-md" id="mp_ytd_${escapeAttr(ticker)}" value="${escapeAttr(p.ytd_ref||0)}"></div>
+        <div class="form-group"><label>As-Of Date</label><input type="date" class="input-md" id="mp_date_${escapeAttr(ticker)}" value="${escapeAttr(p.asof_date||new Date().toISOString().slice(0,10))}"></div>
+        <div class="form-group" style="justify-content:flex-end"><button class="btn btn-secondary btn-sm" onclick="saveManualPrice(${jsArg(ticker)})">Save</button></div>
       </div>
     </div>`;
   });
@@ -410,7 +410,7 @@ function saveManualPrice(ticker){
 function renderEditTxSelect(){
   const txns=loadStockTransactions().filter(r=>r.profile===profile()).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const sel=document.getElementById('editTxSel');
-  sel.innerHTML=txns.map(t=>`<option value="${t.txn_id}">${t.date} | ${t.ticker} | ${t.action} | Qty ${t.qty}</option>`).join('');
+  sel.innerHTML=txns.map(t=>`<option value="${escapeAttr(t.txn_id)}">${escapeHtml(t.date)} | ${escapeHtml(t.ticker)} | ${escapeHtml(t.action)} | Qty ${escapeHtml(t.qty)}</option>`).join('');
   if(txns.length) loadEditForm();
 }
 
@@ -421,19 +421,19 @@ function loadEditForm(){
   if(!tx){document.getElementById('editTxForm').innerHTML='';return;}
   document.getElementById('editTxForm').innerHTML=`
     <div class="form-row">
-      <div class="form-group"><label>Ticker</label><input type="text" id="et_ticker" class="input-sm" value="${tx.ticker}" style="text-transform:uppercase"></div>
+      <div class="form-group"><label>Ticker</label><input type="text" id="et_ticker" class="input-sm" value="${escapeAttr(tx.ticker)}" style="text-transform:uppercase"></div>
       <div class="form-group"><label>Action</label><select id="et_action" class="input-sm"><option ${tx.action==='BUY'?'selected':''}>BUY</option><option ${tx.action==='SELL'?'selected':''}>SELL</option></select></div>
       <div class="form-group"><label>Qty</label><input type="number" id="et_qty" class="input-sm" value="${tx.qty}" step="0.001" min="0"></div>
       <div class="form-group"><label>Price</label><input type="number" id="et_price" class="input-md" value="${tx.price}" step="0.01" min="0"></div>
       <div class="form-group"><label>Currency</label><select id="et_currency" class="input-sm"><option ${tx.currency==='USD'?'selected':''}>USD</option><option ${tx.currency==='SGD'?'selected':''}>SGD</option><option ${tx.currency==='INR'?'selected':''}>INR</option><option ${tx.currency==='EUR'?'selected':''}>EUR</option></select></div>
-      <div class="form-group"><label>Date</label><input type="date" id="et_date" class="input-md" value="${tx.date}"></div>
+      <div class="form-group"><label>Date</label><input type="date" id="et_date" class="input-md" value="${escapeAttr(tx.date)}"></div>
     </div>
     <div class="form-row">
-      <div class="form-group" style="flex:1"><label>Notes</label><input type="text" id="et_notes" class="input-lg" value="${tx.notes||''}"></div>
+      <div class="form-group" style="flex:1"><label>Notes</label><input type="text" id="et_notes" class="input-lg" value="${escapeAttr(tx.notes||'')}"></div>
     </div>
     <div class="flex flex-gap mt-8">
-      <button class="btn btn-primary" onclick="saveEditTx('${id}')">💾 Save Changes</button>
-      <button class="btn btn-danger" onclick="deleteTx('${id}')">🗑️ Delete</button>
+      <button class="btn btn-primary" onclick="saveEditTx(${jsArg(id)})">💾 Save Changes</button>
+      <button class="btn btn-danger" onclick="deleteTx(${jsArg(id)})">🗑️ Delete</button>
     </div>
   `;
 }
@@ -681,7 +681,7 @@ function renderStockPerformance(data) {
   rows.forEach(r => {
     const vsAvg = r.pct - avgPct;
     html += `<tr>
-      <td style="padding:7px 10px;font-weight:700"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${r.color};margin-right:6px"></span>${r.ticker}</td>
+      <td style="padding:7px 10px;font-weight:700"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${r.color};margin-right:6px"></span>${escapeHtml(r.ticker)}</td>
       <td style="padding:7px 10px;text-align:right">S$ ${Number(r.value).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0})}</td>
       <td style="padding:7px 10px;text-align:right">${r.portPct.toFixed(1)}%</td>
       <td style="padding:7px 10px;text-align:right;color:${r.pct>=0?'var(--green)':'var(--red)'};font-weight:600">${r.pct>=0?'+':''}${r.pct.toFixed(1)}%</td>

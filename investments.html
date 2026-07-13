@@ -240,16 +240,16 @@ function renderTable(){
       lastInv=row.invName;
     }
 
-    html+=`<tr data-id="${rowId}" data-inv="${row.invName}" data-metric="${row.metric}" class="${row.status==='Inactive'?'text-muted':''}">`;
-    html+=`<td>${row.band}</td>`;
-    html+=`<td style="text-align:left;font-weight:600">${isMI?row.invName:''}</td>`;
-    html+=`<td style="text-align:left;font-size:0.78rem;color:var(--text-muted)">${isMI?row.invType:''}</td>`;
-    html+=`<td style="text-align:left;font-size:0.82rem;color:${isCum?'var(--text-muted)':'inherit'}">${row.metric}</td>`;
+    html+=`<tr data-id="${escapeAttr(rowId)}" data-inv="${escapeAttr(row.invName)}" data-metric="${escapeAttr(row.metric)}" class="${row.status==='Inactive'?'text-muted':''}">`;
+    html+=`<td>${escapeHtml(row.band)}</td>`;
+    html+=`<td style="text-align:left;font-weight:600">${isMI?escapeHtml(row.invName):''}</td>`;
+    html+=`<td style="text-align:left;font-size:0.78rem;color:var(--text-muted)">${isMI?escapeHtml(row.invType):''}</td>`;
+    html+=`<td style="text-align:left;font-size:0.82rem;color:${isCum?'var(--text-muted)':'inherit'}">${escapeHtml(row.metric)}</td>`;
 
     MONTHS.forEach(m=>{
       const v=row[m]||0;
       if(editable&&row.status!=='Inactive'){
-        html+=`<td><input type="number" min="0" step="1" value="${v}" data-inv="${row.invName}" data-metric="${row.metric}" data-month="${m}" onchange="onInvCellChange(this)" onblur="renderSummary()"></td>`;
+        html+=`<td><input type="number" min="0" step="1" value="${escapeAttr(v)}" data-inv="${escapeAttr(row.invName)}" data-metric="${escapeAttr(row.metric)}" data-month="${escapeAttr(m)}" onchange="onInvCellChange(this)" onblur="renderSummary()"></td>`;
       } else {
         html+=`<td class="mono" style="color:var(--text-muted);font-size:0.82rem">${fmt(v)}</td>`;
       }
@@ -280,10 +280,11 @@ function onInvCellChange(input){
       const cumRow=tableData.find(r=>r.invName===inv&&r.metric==='Cumulative Investment');
       if(cumRow){ Object.assign(cumRow,cum); }
       // Update cumulative cells in DOM
-      const cumInputs=document.querySelectorAll(`[data-inv="${inv}"][data-metric="Cumulative Investment"]`);
+      const cumInputs=[...document.querySelectorAll('[data-inv][data-metric]')]
+        .filter(el => el.dataset.inv === inv && el.dataset.metric === 'Cumulative Investment');
       cumInputs.forEach(el=>{ if(el.tagName==='TD') el.textContent=fmt(cum[el.dataset.month]); });
       // find cumulative row's tds
-      const rows=[...document.querySelectorAll(`tr[data-inv="${inv}"]`)];
+      const rows=[...document.querySelectorAll('tr[data-inv]')].filter(r => r.dataset.inv === inv);
       const cumTr=rows.find(r=>r.dataset.metric==='Cumulative Investment');
       if(cumTr){
         [...cumTr.querySelectorAll('td.mono')].forEach((td,i)=>{ if(i<12) td.textContent=fmt(cum[MONTHS[i]]); });
@@ -336,9 +337,12 @@ function renderSummary(){
 // ── Save ──────────────────────────────────────────────────
 function saveInvestments(){
   const year=parseInt(yearSel.value);
-  let stored=loadInvestmentData().filter(r=>r.year!==year);
   const now=new Date().toISOString();
   const METRIC_CODE={'Monthly Investment':'monthly_investment','Market Value':'market_value'};
+  const editableNames = [...new Set(tableData
+    .filter(row => row.status !== 'Inactive' && METRIC_CODE[row.metric])
+    .map(row => row.invName))];
+  let stored=loadInvestmentData().filter(r=>!(r.year===year && editableNames.includes(r.category)));
 
   tableData.forEach(row=>{
     if(row.status==='Inactive') return;
@@ -365,10 +369,10 @@ function renderFocusAndManage(){
   const names=cats.map(c=>c.category);
 
   const focSel=document.getElementById('focusInv');
-  focSel.innerHTML='<option value="All">All</option>'+names.map(n=>`<option>${n}</option>`).join('');
+  focSel.innerHTML='<option value="All">All</option>'+names.map(n=>`<option>${escapeHtml(n)}</option>`).join('');
 
-  document.getElementById('manageInvSel').innerHTML=names.map(n=>`<option>${n}</option>`).join('');
-  document.getElementById('fxInv').innerHTML=names.map(n=>`<option>${n}</option>`).join('');
+  document.getElementById('manageInvSel').innerHTML=names.map(n=>`<option>${escapeHtml(n)}</option>`).join('');
+  document.getElementById('fxInv').innerHTML=names.map(n=>`<option>${escapeHtml(n)}</option>`).join('');
 }
 
 function addInvestment(){
@@ -419,7 +423,8 @@ function applyFX(){
   const converted=Math.round(amount*rate*100)/100;
   const row=tableData.find(r=>r.invName===inv&&r.metric===metric);
   if(row){ row[month]=converted; }
-  const input=document.querySelector(`input[data-inv="${inv}"][data-metric="${metric}"][data-month="${month}"]`);
+  const input=[...document.querySelectorAll('input[data-inv][data-metric][data-month]')]
+    .find(el => el.dataset.inv === inv && el.dataset.metric === metric && el.dataset.month === month);
   if(input){ input.value=converted; onInvCellChange(input); }
   document.getElementById('fxResult').textContent=`${amount} ${from} → ${converted} ${to} applied to ${inv} (${metric}, ${month})`;
 }

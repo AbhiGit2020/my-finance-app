@@ -424,7 +424,7 @@ function renderDrill(year) {
             ${incCats.map(cat=>{
               const vals = MONTHS.map((_,i)=>recs.filter(r=>r.month===i+1&&r.category===cat.category).reduce((s,r)=>s+r.amount,0));
               const ytd = vals.reduce((a,b)=>a+b,0);
-              return `<tr><td style="padding:6px 10px;font-weight:500">${cat.category}</td>${vals.map(v=>`<td style="padding:6px 10px;text-align:right">${fmt(v)}</td>`).join('')}<td style="padding:6px 10px;text-align:right;font-weight:700">${fmt(ytd)}</td></tr>`;
+              return `<tr><td style="padding:6px 10px;font-weight:500">${escapeHtml(cat.category)}</td>${vals.map(v=>`<td style="padding:6px 10px;text-align:right">${fmt(v)}</td>`).join('')}<td style="padding:6px 10px;text-align:right;font-weight:700">${fmt(ytd)}</td></tr>`;
             }).join('')}
           </tbody>
         </table>
@@ -449,7 +449,7 @@ function renderDrill(year) {
                 + grpCats.map(cat=>{
                   const vals = MONTHS.map((_,i)=>recs.filter(r=>r.month===i+1&&r.category===cat.category).reduce((s,r)=>s+r.amount,0));
                   const ytd = vals.reduce((a,b)=>a+b,0);
-                  return `<tr><td style="padding:6px 10px;padding-left:20px">${cat.category}</td>${vals.map(v=>`<td style="padding:6px 10px;text-align:right">${fmt(v)}</td>`).join('')}<td style="padding:6px 10px;text-align:right;font-weight:700">${fmt(ytd)}</td></tr>`;
+                  return `<tr><td style="padding:6px 10px;padding-left:20px">${escapeHtml(cat.category)}</td>${vals.map(v=>`<td style="padding:6px 10px;text-align:right">${fmt(v)}</td>`).join('')}<td style="padding:6px 10px;text-align:right;font-weight:700">${fmt(ytd)}</td></tr>`;
                 }).join('');
             }).join('')}
           </tbody>

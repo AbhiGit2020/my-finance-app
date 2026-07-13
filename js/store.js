@@ -19,6 +19,7 @@ let _folderId    = null;
 let _fileId      = null;
 let _signedIn    = false;
 let _dataReady   = false;
+let _driveLoadFailed = false;
 
 // ── Empty DB ──────────────────────────────────────────────
 function emptyDb() {
@@ -55,6 +56,19 @@ function initProfileSelector() {
     sel.value = active;
     sel.onchange = () => setActiveProfile(sel.value);
   });
+}
+
+// ── Safe HTML helpers ────────────────────────────────────────
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[ch]));
+}
+function escapeAttr(value) {
+  return escapeHtml(value);
+}
+function jsArg(value) {
+  return escapeHtml(JSON.stringify(String(value ?? '')));
 }
 
 // ── Session ───────────────────────────────────────────────
@@ -195,6 +209,7 @@ async function loadFromDrive() {
     showStatus('⏳ Loading…');
     const fileId = await ensureFile();
     if (!fileId) {
+      _driveLoadFailed = false;
       showStatus('New file — save to create.', 'var(--text-muted)');
       _db = emptyDb();
       _db.finance_categories = seedCategories(2024);
@@ -208,11 +223,13 @@ async function loadFromDrive() {
     if (!res.ok) throw new Error('Download failed ' + res.status);
     const data = await res.json();
     _db = { ...emptyDb(), ...data };
+    _driveLoadFailed = false;
     _dataReady = true;
     showStatus('✅ Loaded from Drive', 'var(--green)');
     triggerRender();
   } catch(e) {
     console.error('loadFromDrive:', e);
+    _driveLoadFailed = true;
     showStatus('⚠️ Load failed', 'var(--red)');
     _dataReady = true;
     triggerRender();
@@ -222,17 +239,23 @@ async function loadFromDrive() {
 // ── Save to Drive (overwrite only) ────────────────────────
 async function driveSave() {
   if (!_accessToken) { showStatus('⚠️ Not signed in', 'var(--yellow)'); return false; }
+  if (_driveLoadFailed) {
+    showStatus('⚠️ Save blocked: reload Drive data first', 'var(--red)');
+    alert('Google Drive data did not load successfully. Save is blocked to avoid overwriting your Drive file with incomplete local data. Please refresh from Drive and try again.');
+    return false;
+  }
   try {
     showStatus('⏳ Saving to Google Drive…');
     const blob = new Blob([JSON.stringify({ ..._db, saved_at: new Date().toISOString() }, null, 2)], { type: 'application/json' });
     const folderId = await ensureFolder();
 
     if (_fileId) {
-      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${_fileId}?uploadType=media`, {
+      const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${_fileId}?uploadType=media`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${_accessToken}`, 'Content-Type': 'application/json' },
         body: blob,
       });
+      if (!res.ok) throw new Error('Drive PATCH failed ' + res.status);
     } else {
       const form = new FormData();
       form.append('metadata', new Blob([JSON.stringify({ name: DATA_FILENAME, parents: [folderId] })], { type: 'application/json' }));
@@ -240,6 +263,7 @@ async function driveSave() {
       const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
         method: 'POST', headers: { Authorization: `Bearer ${_accessToken}` }, body: form,
       });
+      if (!res.ok) throw new Error('Drive create failed ' + res.status);
       _fileId = (await res.json()).id;
       sessionStorage.setItem(SS_FILE, _fileId);
     }
@@ -256,16 +280,18 @@ async function driveSave() {
 async function driveBackup() {
   if (!_accessToken) { showStatus('⚠️ Not signed in', 'var(--yellow)'); return false; }
   try {
-    await driveSave(); // ensure latest saved first
+    const saved = await driveSave(); // ensure latest saved first
+    if (!saved) return false;
     const folderId = await ensureFolder();
     const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,16);
     const blob = new Blob([JSON.stringify({ ..._db, saved_at: new Date().toISOString() }, null, 2)], { type: 'application/json' });
     const form = new FormData();
     form.append('metadata', new Blob([JSON.stringify({ name: `backup_${ts}.json`, parents: [folderId] })], { type: 'application/json' }));
     form.append('file', blob);
-    await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
       method: 'POST', headers: { Authorization: `Bearer ${_accessToken}` }, body: form,
     });
+    if (!res.ok) throw new Error('Drive backup failed ' + res.status);
     showStatus(`✅ Backup saved: backup_${ts}.json`, 'var(--green)');
     return true;
   } catch(e) {

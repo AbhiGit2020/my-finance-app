@@ -281,7 +281,7 @@ function renderPivot() {
     const sortedGroups = [...new Set(cats.map(c=>c.group))].sort((a,b)=>(GO[a]||99)-(GO[b]||99));
     sortedGroups.forEach(grp => {
       const grpCats = cats.filter(c=>c.group===grp);
-      html += `<tr class="group-header"><td colspan="${2+MONTHS.length}">${grp}</td></tr>`;
+      html += `<tr class="group-header"><td colspan="${2+MONTHS.length}">${escapeHtml(grp)}</td></tr>`;
       grpCats.forEach(cat => { html += buildEditRow(cat.category); });
     });
   } else {
@@ -297,10 +297,10 @@ function renderPivot() {
 
 function buildEditRow(catName) {
   const row = pivotData.find(r=>r.Category===catName) || { Category: catName };
-  let html = `<tr data-cat="${catName}"><td>${catName}</td>`;
+  let html = `<tr data-cat="${escapeAttr(catName)}"><td>${escapeHtml(catName)}</td>`;
   MONTHS.forEach(m => {
     const v = row[m] || 0;
-    html += `<td><input type="number" min="0" step="1" value="${v}" data-cat="${catName}" data-month="${m}" onchange="onCellChange(this)" onblur="renderTotals()"></td>`;
+    html += `<td><input type="number" min="0" step="1" value="${escapeAttr(v)}" data-cat="${escapeAttr(catName)}" data-month="${escapeAttr(m)}" onchange="onCellChange(this)" onblur="renderTotals()"></td>`;
   });
   const ytd = MONTHS.reduce((s,m)=>s+(parseFloat(row[m])||0),0);
   html += `<td class="bold mono" id="ytd_${catName.replace(/\W/g,'_')}">${fmt(ytd)}</td></tr>`;
@@ -342,7 +342,7 @@ function renderTotals() {
 function renderManageSel() {
   const sel = document.getElementById('manageCatSel');
   const cats = getActiveCats();
-  sel.innerHTML = cats.map(c=>`<option value="${c.category}">${c.category}</option>`).join('');
+  sel.innerHTML = cats.map(c=>`<option value="${escapeAttr(c.category)}">${escapeHtml(c.category)}</option>`).join('');
   // Pre-fill rename input with current selection
   const renameEl = document.getElementById('renameCatInput');
   if (renameEl && cats.length) renameEl.value = cats[0].category;
@@ -351,7 +351,7 @@ function renderManageSel() {
 function renderCalcCat() {
   const sel = document.getElementById('calcCat');
   const cats = getActiveCats();
-  sel.innerHTML = cats.map(c=>`<option value="${c.category}">${c.category}</option>`).join('');
+  sel.innerHTML = cats.map(c=>`<option value="${escapeAttr(c.category)}">${escapeHtml(c.category)}</option>`).join('');
 }
 
 // ── Historical pivot ──────────────────────────────────────
@@ -366,7 +366,7 @@ function renderHistTable() {
   html += '</tr></thead><tbody>';
 
   cats.forEach(cat => {
-    html += `<tr><td>${cat.category}</td>`;
+    html += `<tr><td>${escapeHtml(cat.category)}</td>`;
     years.forEach(y => {
       const total = recs.filter(r=>r.year===y&&r.category===cat.category).reduce((s,r)=>s+r.amount,0);
       html += `<td>${fmt(total)}</td>`;
@@ -398,10 +398,10 @@ function renderDisc() {
   let ehtml = '<thead><tr><th>Date</th><th>Amount (SGD)</th><th style="text-align:left">Note</th><th></th></tr></thead><tbody>';
   entries.forEach(e=>{
     ehtml += `<tr>
-      <td>${e.date||''}</td>
+      <td>${escapeHtml(e.date||'')}</td>
       <td class="neg">${Number(e.amount_sgd||0).toFixed(2)}</td>
-      <td style="text-align:left">${e.note||''}</td>
-      <td><button class="btn btn-danger btn-sm" onclick="deleteUE('${e.entry_id}')">🗑</button></td>
+      <td style="text-align:left">${escapeHtml(e.note||'')}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteUE(${jsArg(e.entry_id)})">🗑</button></td>
     </tr>`;
   });
   if(!entries.length) ehtml += '<tr><td colspan="4" class="text-muted" style="text-align:center;padding:20px">No entries yet</td></tr>';
@@ -549,7 +549,7 @@ function applyCalc() {
   row[month] = total;
 
   // Update input in DOM
-  const input = document.querySelector(`input[data-cat="${catName}"][data-month="${month}"]`);
+  const input = [...document.querySelectorAll('input[data-month]')].find(el => el.dataset.cat === catName && el.dataset.month === month);
   if(input){ input.value=total; }
   const ytd = MONTHS.reduce((s,m)=>s+(parseFloat(row[m])||0),0);
   const ytdEl = document.getElementById('ytd_'+catName.replace(/\W/g,'_'));
