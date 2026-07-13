@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Finance App — Stock Compare</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="js/store.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+.chart-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
+.chart-title { font-size:0.88rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; }
+.chart-wrap { position:relative; height:340px; }
+.pick-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; }
+.pick-item { background:var(--bg3); border:1px solid var(--border); border-radius:8px; padding:9px 11px; display:flex; gap:8px; align-items:flex-start; }
+.pick-item input { margin-top:2px; }
+.pick-symbol { font-weight:700; font-family:'IBM Plex Mono',monospace; }
+.pick-meta { color:var(--text-muted); font-size:0.76rem; margin-top:2px; }
+</style>
+</head>
+<body>
+<div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading your data from Google Drive…</div></div>
+
+<nav class="nav">
+  <a class="nav-brand" href="index.html">💰 MyFinance</a>
+  <div class="nav-links">
+    <a href="index.html" class="">Dashboard</a>
+    <a href="input.html" class="">Finance Input</a>
+    <a href="investments.html" class="">Investments</a>
+    <a href="stocks.html" class="">Stocks</a>
+    <a href="stock_tracker.html" class="">Tracker</a>
+    <a href="stock_compare.html" class="active">Compare</a>
+    <a href="assets.html" class="">Assets</a>
+  </div>
+  <div class="nav-right">
+    <span id="driveStatus" class="drive-status-text"></span>
+    <span id="authStatus" class="auth-badge"></span>
+    <div class="nav-btn-row">
+      <select class="global-profile-sel profile-sel-nav"></select>
+      <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">🔑 Sign in</button>
+      <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">🔄</button>
+      <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
+      <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">💾</button>
+      <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
+    </div>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-title">📊 Stock Compare</div>
+
+  <div class="flex flex-gap flex-center mb-16 flex-wrap">
+    <div class="form-group">
+      <label>Watchlist Filter</label>
+      <select id="watchlistFilter" class="input-md" onchange="render()"></select>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:flex-end">
+      <button class="btn btn-primary" id="compareFetchBtn" onclick="fetchSelectedCurrentPrices()">🔄 Fetch Current</button>
+      <button class="btn btn-secondary" onclick="exportCompareExcel()">⬇ Export Excel</button>
+    </div>
+  </div>
+
+  <details open>
+    <summary>Pick Symbols</summary>
+    <div class="details-content">
+      <div class="pick-grid" id="symbolPicker"></div>
+    </div>
+  </details>
+
+  <details>
+    <summary>Jan 1 2025 Baseline</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Symbol</label>
+          <input type="text" id="baselineSymbol" class="input-sm" placeholder="AAPL" style="text-transform:uppercase">
+        </div>
+        <div class="form-group">
+          <label>Baseline Date</label>
+          <input type="date" id="baselineDate" class="input-md" value="2025-01-01">
+        </div>
+        <div class="form-group">
+          <label>Close</label>
+          <input type="number" id="baselineClose" class="input-md" min="0" step="0.01" value="0">
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-secondary" onclick="saveBaseline()">Save Baseline</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <div class="chart-card">
+    <div class="chart-title"><span>% Movement Since Jan 1 2025</span><span id="compareCount"></span></div>
+    <div id="compareEmpty" class="chart-loading">Track symbols first, then select up to 10 to compare.</div>
+    <div class="chart-wrap" id="compareChartWrap" style="display:none"><canvas id="compareChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Comparison Table</div>
+    <div class="tbl-wrap"><table id="compareTable"></table></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+const FINNHUB_KEY = 'd7lgg9hr01qm7o0bp0d0d7lgg9hr01qm7o0bp0dg';
+const COMPARE_KEY = 'hf_compare_symbols';
+const BASELINE_DATE = '2025-01-01';
+const CHART_COLORS = ['#068a91','#3fb950','#d29922','#f85149','#a371f7','#58a6ff','#fb8500','#2dc653','#f778ba','#8ddb8c'];
+window.compareChart = null;
+
+function toast(msg,type='success'){const c=document.getElementById('toastContainer');const d=document.createElement('div');d.className=`toast ${type}`;d.textContent=msg;c.appendChild(d);setTimeout(()=>d.remove(),3500);}
+function profile(){return getActiveProfile();}
+function fmt(n,dec=2){return Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:dec,maximumFractionDigits:dec});}
+function fmtPct(n){return `${n>=0?'+':''}${Number(n||0).toFixed(2)}%`;}
+function normSymbol(v){return String(v||'').trim().toUpperCase();}
+function selectedSymbols(){try{return JSON.parse(localStorage.getItem(`${COMPARE_KEY}_${profile()}`)||'[]');}catch(e){return [];}}
+function saveSelectedSymbols(arr){localStorage.setItem(`${COMPARE_KEY}_${profile()}`, JSON.stringify(arr.slice(0,10)));}
+function watchlists(){return loadStockWatchlists().filter(w=>w.profile===profile()&&w.active!==false).sort((a,b)=>a.name.localeCompare(b.name));}
+function trackedSymbols(){
+  const filter=document.getElementById('watchlistFilter')?.value||'All';
+  const rows=loadStockTrackerSymbols().filter(s=>s.profile===profile()&&s.active!==false);
+  return rows.filter(s=>filter==='All'||s.watchlist_id===filter).sort((a,b)=>a.symbol.localeCompare(b.symbol));
+}
+function uniqueTrackedSymbols(){
+  const map={};
+  trackedSymbols().forEach(s=>{if(!map[s.symbol]) map[s.symbol]=s;});
+  return Object.values(map);
+}
+function snapshots(symbol){return loadStockTrackerPrices().filter(p=>p.profile===profile()&&p.symbol===symbol).sort((a,b)=>a.asof_date.localeCompare(b.asof_date)||new Date(a.fetched_at||0)-new Date(b.fetched_at||0));}
+function baseline(symbol){return snapshots(symbol).find(p=>p.asof_date===BASELINE_DATE)||snapshots(symbol).find(p=>p.asof_date===document.getElementById('baselineDate').value)||null;}
+function latest(symbol){const rows=snapshots(symbol);return rows[rows.length-1]||null;}
+
+async function fetchOneTicker(symbol){
+  const res=await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_KEY}`);
+  if(!res.ok) throw new Error('quote fetch failed');
+  const q=await res.json();
+  const close=parseFloat(q.c)||0;
+  if(close<=0) throw new Error('no price');
+  return {asof_date:new Date().toISOString().slice(0,10),close};
+}
+
+function upsertPrice(symbol,date,close,source){
+  let rows=loadStockTrackerPrices().filter(p=>!(p.profile===profile()&&p.symbol===symbol&&p.asof_date===date));
+  rows.push({price_id:uuid(),profile:profile(),symbol,asof_date:date,close,source,fetched_at:new Date().toISOString()});
+  saveStockTrackerPrices(rows);
+}
+
+function toggleSymbol(symbol,checked){
+  let sel=selectedSymbols();
+  if(checked){
+    if(sel.length>=10){toast('Compare supports up to 10 symbols','error');render();return;}
+    if(!sel.includes(symbol)) sel.push(symbol);
+  } else {
+    sel=sel.filter(s=>s!==symbol);
+  }
+  saveSelectedSymbols(sel);
+  render();
+}
+
+function saveBaseline(){
+  const symbol=normSymbol(document.getElementById('baselineSymbol').value);
+  const date=document.getElementById('baselineDate').value || BASELINE_DATE;
+  const close=parseFloat(document.getElementById('baselineClose').value)||0;
+  if(!symbol||close<=0){toast('Valid symbol and close required','error');return;}
+  upsertPrice(symbol,date,close,'baseline');
+  document.getElementById('baselineClose').value='0';
+  render();
+  toast(`Baseline saved for ${symbol}`);
+}
+
+async function fetchSelectedCurrentPrices(){
+  const symbols=selectedSymbols();
+  if(!symbols.length){toast('Select symbols first','error');return;}
+  const btn=document.getElementById('compareFetchBtn');
+  btn.disabled=true;btn.textContent='⏳ Fetching…';
+  let fetched=0,failed=[];
+  for(const symbol of symbols){
+    try{const q=await fetchOneTicker(symbol);upsertPrice(symbol,q.asof_date,q.close,'finnhub');fetched++;}
+    catch(e){failed.push(symbol);}
+  }
+  btn.disabled=false;btn.textContent='🔄 Fetch Current';
+  render();
+  if(failed.length) toast(`Fetched ${fetched}. Failed: ${failed.join(', ')}`,'info');
+  else toast(`Current prices updated for ${fetched} symbol(s)`);
+}
+
+function comparisonRows(){
+  return selectedSymbols().map((symbol,i)=>{
+    const b=baseline(symbol), l=latest(symbol);
+    const bp=b?parseFloat(b.close)||0:0;
+    const lp=l?parseFloat(l.close)||0:0;
+    const pct=bp>0&&lp>0?(lp-bp)/bp*100:0;
+    return {symbol,baseline:b,latest:l,baselinePrice:bp,latestPrice:lp,pct,color:CHART_COLORS[i%CHART_COLORS.length]};
+  });
+}
+
+function chartData(rows){
+  const dates=[...new Set(rows.flatMap(r=>snapshots(r.symbol).filter(p=>p.asof_date>=BASELINE_DATE).map(p=>p.asof_date)))].sort();
+  const datasets=rows.map(r=>({
+    label:r.symbol,borderColor:r.color,backgroundColor:'transparent',borderWidth:2,tension:0.25,spanGaps:true,pointRadius:2,pointHoverRadius:5,
+    data:dates.map(d=>{
+      if(!r.baselinePrice) return null;
+      const snap=snapshots(r.symbol).filter(p=>p.asof_date<=d).pop();
+      if(!snap) return null;
+      return ((parseFloat(snap.close)||0)-r.baselinePrice)/r.baselinePrice*100;
+    })
+  }));
+  return {dates,datasets};
+}
+
+function render(){
+  const wf=document.getElementById('watchlistFilter');
+  const current=wf.value||'All';
+  wf.innerHTML='<option value="All">All Watchlists</option>'+watchlists().map(w=>`<option value="${escapeAttr(w.watchlist_id)}" ${w.watchlist_id===current?'selected':''}>${escapeHtml(w.name)}</option>`).join('');
+
+  const selected=selectedSymbols();
+  const symbols=uniqueTrackedSymbols();
+  document.getElementById('symbolPicker').innerHTML=symbols.map(s=>`
+    <label class="pick-item">
+      <input type="checkbox" ${selected.includes(s.symbol)?'checked':''} onchange="toggleSymbol(${jsArg(s.symbol)},this.checked)">
+      <span><span class="pick-symbol">${escapeHtml(s.symbol)}</span><div class="pick-meta">${escapeHtml(s.label||s.kind||'')}</div></span>
+    </label>`).join('') || '<div class="pick-item"><span class="pick-meta">No tracked symbols yet.</span></div>';
+
+  const rows=comparisonRows();
+  document.getElementById('compareCount').textContent=`${rows.length}/10 selected`;
+
+  let html='<thead><tr><th>Symbol</th><th>Jan 1 2025</th><th>Latest</th><th>% Move</th><th>Status</th></tr></thead><tbody>';
+  if(!rows.length) html+='<tr><td colspan="5" class="text-muted" style="text-align:center;padding:16px">Select tracked symbols to compare.</td></tr>';
+  rows.forEach(r=>{
+    const status=!r.baseline?'Missing baseline':!r.latest?'Missing current':'Ready';
+    html+=`<tr>
+      <td class="bold">${escapeHtml(r.symbol)}</td>
+      <td>${r.baseline?`${fmt(r.baselinePrice)} (${escapeHtml(r.baseline.asof_date)})`:'—'}</td>
+      <td>${r.latest?`${fmt(r.latestPrice)} (${escapeHtml(r.latest.asof_date)})`:'—'}</td>
+      <td class="${r.pct>0?'pos':r.pct<0?'neg':''} bold">${r.baseline&&r.latest?fmtPct(r.pct):'—'}</td>
+      <td class="text-muted">${status}</td>
+    </tr>`;
+  });
+  html+='</tbody>';
+  document.getElementById('compareTable').innerHTML=html;
+  renderChart(rows);
+}
+
+function renderChart(rows){
+  if(window.compareChart){window.compareChart.destroy();window.compareChart=null;}
+  const empty=document.getElementById('compareEmpty'), wrap=document.getElementById('compareChartWrap');
+  const ready=rows.filter(r=>r.baselinePrice>0);
+  const {dates,datasets}=chartData(ready);
+  if(!rows.length||!ready.length||!dates.length){empty.style.display='block';empty.textContent=!rows.length?'Select tracked symbols to compare.':'Add Jan 1 2025 baselines and current prices to draw comparison.';wrap.style.display='none';return;}
+  empty.style.display='none';wrap.style.display='block';
+  window.compareChart=new Chart(document.getElementById('compareChart'),{
+    type:'line',
+    data:{labels:dates.map(d=>new Date(d).toLocaleDateString('en-SG',{month:'short',day:'numeric',year:'2-digit'})),datasets},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#8b949e',font:{size:11}}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${Number(ctx.raw||0).toFixed(2)}%`}}},scales:{x:{ticks:{color:'#8b949e',maxTicksLimit:12},grid:{color:'rgba(255,255,255,0.05)'}},y:{ticks:{color:'#8b949e',callback:v=>Number(v).toFixed(0)+'%'},grid:{color:'rgba(255,255,255,0.05)'}}}}
+  });
+}
+
+function exportCompareExcel(){
+  exportToExcel([
+    {name:'Compare Selection',data:comparisonRows().map(r=>({symbol:r.symbol,baseline_date:r.baseline?.asof_date||'',baseline_price:r.baselinePrice,latest_date:r.latest?.asof_date||'',latest_price:r.latestPrice,move_pct:r.pct}))},
+    {name:'Tracker Prices',data:loadStockTrackerPrices().filter(r=>r.profile===profile())},
+  ]);
+}
+
+async function refreshFromDrive(){const overlay=document.getElementById('loadingOverlay');const msg=document.getElementById('loadingMsg');if(overlay){overlay.style.display='flex';overlay.style.opacity='1';}if(msg)msg.textContent='Refreshing from Google Drive…';await loadFromDrive();}
+window.onProfileChange=function(){if(window.compareChart){window.compareChart.destroy();window.compareChart=null;}};
+window.onDataLoaded=render;
+</script>
+</body>
+</html>

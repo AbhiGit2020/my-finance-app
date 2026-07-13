@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Finance App — Stock Tracker</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="js/store.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+.chart-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
+.chart-title { font-size:0.88rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; }
+.chart-wrap { position:relative; height:320px; }
+.watchlist-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:16px; }
+.watch-card { background:var(--bg3); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
+.watch-name { font-weight:700; }
+.watch-meta { color:var(--text-muted); font-size:0.76rem; margin-top:4px; }
+</style>
+</head>
+<body>
+<div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading your data from Google Drive…</div></div>
+
+<nav class="nav">
+  <a class="nav-brand" href="index.html">💰 MyFinance</a>
+  <div class="nav-links">
+    <a href="index.html" class="">Dashboard</a>
+    <a href="input.html" class="">Finance Input</a>
+    <a href="investments.html" class="">Investments</a>
+    <a href="stocks.html" class="">Stocks</a>
+    <a href="stock_tracker.html" class="active">Tracker</a>
+    <a href="stock_compare.html" class="">Compare</a>
+    <a href="assets.html" class="">Assets</a>
+  </div>
+  <div class="nav-right">
+    <span id="driveStatus" class="drive-status-text"></span>
+    <span id="authStatus" class="auth-badge"></span>
+    <div class="nav-btn-row">
+      <select class="global-profile-sel profile-sel-nav"></select>
+      <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">🔑 Sign in</button>
+      <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">🔄</button>
+      <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
+      <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">💾</button>
+      <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
+    </div>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-title">👀 Stock Tracker</div>
+
+  <div class="flex flex-gap flex-center mb-16 flex-wrap">
+    <div class="form-group">
+      <label>Watchlist</label>
+      <select id="watchlistSel" class="input-md" onchange="setSelectedWatchlist(this.value)"></select>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:flex-end">
+      <button class="btn btn-secondary" onclick="createStarterWatchlists()">Create Starter Lists</button>
+      <button class="btn btn-primary" id="fetchTrackerBtn" onclick="fetchSelectedWatchlistPrices()">🔄 Fetch Prices</button>
+      <button class="btn btn-secondary" onclick="exportTrackerExcel()">⬇ Export Excel</button>
+    </div>
+  </div>
+
+  <div class="watchlist-grid" id="watchlistKPIs"></div>
+
+  <details>
+    <summary>➕ Watchlists</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="newWatchlistName" class="input-md" placeholder="Tech Sector">
+        </div>
+        <div class="form-group" style="flex:2">
+          <label>Notes</label>
+          <input type="text" id="newWatchlistNotes" class="input-lg" placeholder="optional">
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="addWatchlist()">Add Watchlist</button>
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-danger" onclick="retireSelectedWatchlist()">Retire Selected</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details open>
+    <summary>➕ Symbols</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Symbol</label>
+          <input type="text" id="newSymbol" class="input-sm" placeholder="AAPL" style="text-transform:uppercase">
+        </div>
+        <div class="form-group">
+          <label>Label</label>
+          <input type="text" id="newSymbolLabel" class="input-md" placeholder="Apple">
+        </div>
+        <div class="form-group">
+          <label>Type</label>
+          <select id="newSymbolKind" class="input-sm"><option>Stock</option><option>Index</option><option>ETF</option><option>Crypto</option><option>Other</option></select>
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="addTrackedSymbol()">Add Symbol</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Manual Symbol</label>
+          <input type="text" id="manualSymbol" class="input-sm" placeholder="AAPL" style="text-transform:uppercase">
+        </div>
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="manualDate" class="input-md">
+        </div>
+        <div class="form-group">
+          <label>Close</label>
+          <input type="number" id="manualClose" class="input-md" min="0" step="0.01" value="0">
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-secondary" onclick="addManualSnapshot()">Add Snapshot</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <div class="chart-card">
+    <div class="chart-title"><span>Price Movement</span><span id="trackerCount"></span></div>
+    <div id="trackerChartEmpty" class="chart-loading">Create a watchlist and add symbols to begin tracking.</div>
+    <div class="chart-wrap" id="trackerChartWrap" style="display:none"><canvas id="trackerChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Tracked Symbols</div>
+    <div class="tbl-wrap"><table id="symbolsTable"></table></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Price Snapshots</div>
+    <div class="tbl-wrap"><table id="snapshotsTable"></table></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+const FINNHUB_KEY = 'd7lgg9hr01qm7o0bp0d0d7lgg9hr01qm7o0bp0dg';
+const WATCHLIST_KEY = 'hf_tracker_watchlist';
+const CHART_COLORS = ['#068a91','#3fb950','#d29922','#f85149','#a371f7','#58a6ff','#fb8500','#2dc653','#f778ba','#8ddb8c'];
+window.trackerChart = null;
+
+document.getElementById('manualDate').value = new Date().toISOString().slice(0,10);
+
+function toast(msg,type='success'){const c=document.getElementById('toastContainer');const d=document.createElement('div');d.className=`toast ${type}`;d.textContent=msg;c.appendChild(d);setTimeout(()=>d.remove(),3500);}
+function profile(){return getActiveProfile();}
+function fmt(n,dec=2){return Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:dec,maximumFractionDigits:dec});}
+function fmtPct(n){return `${n>=0?'+':''}${Number(n||0).toFixed(2)}%`;}
+function normSymbol(v){return String(v||'').trim().toUpperCase();}
+function selectedWatchlistId(){return localStorage.getItem(`${WATCHLIST_KEY}_${profile()}`) || activeWatchlists()[0]?.watchlist_id || '';}
+function setSelectedWatchlist(id){localStorage.setItem(`${WATCHLIST_KEY}_${profile()}`, id); render();}
+function activeWatchlists(){return loadStockWatchlists().filter(w=>w.profile===profile()&&w.active!==false).sort((a,b)=>a.name.localeCompare(b.name));}
+function activeSymbols(watchlistId=selectedWatchlistId()){return loadStockTrackerSymbols().filter(s=>s.profile===profile()&&s.watchlist_id===watchlistId&&s.active!==false).sort((a,b)=>a.symbol.localeCompare(b.symbol));}
+function symbolSnapshots(symbol){return loadStockTrackerPrices().filter(p=>p.profile===profile()&&p.symbol===symbol).sort((a,b)=>a.asof_date.localeCompare(b.asof_date)||new Date(a.fetched_at||0)-new Date(b.fetched_at||0));}
+function latestSnapshot(symbol){const rows=symbolSnapshots(symbol);return rows[rows.length-1]||null;}
+function firstSnapshot(symbol){return symbolSnapshots(symbol)[0]||null;}
+
+async function fetchOneTicker(symbol){
+  const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_KEY}`);
+  if(!res.ok) throw new Error('quote fetch failed');
+  const q = await res.json();
+  const close = parseFloat(q.c)||0;
+  if(close<=0) throw new Error('no price');
+  return {asof_date:new Date().toISOString().slice(0,10), close};
+}
+
+function addWatchlist(){
+  const name=document.getElementById('newWatchlistName').value.trim();
+  const notes=document.getElementById('newWatchlistNotes').value.trim();
+  if(!name){toast('Watchlist name required','error');return;}
+  const rows=loadStockWatchlists();
+  if(rows.find(w=>w.profile===profile()&&w.active!==false&&w.name.toLowerCase()===name.toLowerCase())){toast('Watchlist already exists','error');return;}
+  const now=new Date().toISOString();
+  const id=uuid();
+  rows.push({watchlist_id:id,profile:profile(),name,notes,active:true,created_at:now,updated_at:now});
+  saveStockWatchlists(rows);
+  setSelectedWatchlist(id);
+  document.getElementById('newWatchlistName').value='';
+  document.getElementById('newWatchlistNotes').value='';
+  toast(`Watchlist added: ${name}`);
+}
+
+function createStarterWatchlists(){
+  const starters=['Indices','Tech Sector','Health','Energy'];
+  const rows=loadStockWatchlists();
+  let firstId=selectedWatchlistId();
+  starters.forEach(name=>{
+    if(rows.find(w=>w.profile===profile()&&w.name.toLowerCase()===name.toLowerCase())) return;
+    const id=uuid();
+    if(!firstId) firstId=id;
+    rows.push({watchlist_id:id,profile:profile(),name,notes:'',active:true,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+  });
+  saveStockWatchlists(rows);
+  if(firstId) setSelectedWatchlist(firstId);
+  render();
+  toast('Starter lists ready');
+}
+
+function retireSelectedWatchlist(){
+  const id=selectedWatchlistId();
+  if(!id) return;
+  const rows=loadStockWatchlists();
+  const found=rows.find(w=>w.watchlist_id===id&&w.profile===profile());
+  if(found){found.active=false;found.updated_at=new Date().toISOString();saveStockWatchlists(rows);}
+  const next=activeWatchlists().find(w=>w.watchlist_id!==id);
+  localStorage.setItem(`${WATCHLIST_KEY}_${profile()}`, next?.watchlist_id||'');
+  render();
+  toast('Watchlist retired','info');
+}
+
+function addTrackedSymbol(){
+  const watchlistId=selectedWatchlistId();
+  if(!watchlistId){toast('Create a watchlist first','error');return;}
+  const symbol=normSymbol(document.getElementById('newSymbol').value);
+  const label=document.getElementById('newSymbolLabel').value.trim();
+  const kind=document.getElementById('newSymbolKind').value;
+  if(!symbol){toast('Symbol required','error');return;}
+  const rows=loadStockTrackerSymbols();
+  const existing=rows.find(s=>s.profile===profile()&&s.watchlist_id===watchlistId&&s.symbol===symbol);
+  if(existing){existing.active=true;existing.label=label||existing.label||symbol;existing.kind=kind;existing.updated_at=new Date().toISOString();}
+  else rows.push({symbol_id:uuid(),profile:profile(),watchlist_id:watchlistId,symbol,label:label||symbol,kind,active:true,added_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+  saveStockTrackerSymbols(rows);
+  document.getElementById('newSymbol').value='';
+  document.getElementById('newSymbolLabel').value='';
+  render();
+  toast(`Tracking ${symbol}`);
+}
+
+function removeTrackedSymbol(symbolId){
+  const rows=loadStockTrackerSymbols();
+  const found=rows.find(s=>s.symbol_id===symbolId&&s.profile===profile());
+  if(found){found.active=false;found.updated_at=new Date().toISOString();saveStockTrackerSymbols(rows);}
+  render();
+  toast('Symbol removed','info');
+}
+
+function addSnapshot(symbol,date,close,source){
+  let rows=loadStockTrackerPrices().filter(p=>!(p.profile===profile()&&p.symbol===symbol&&p.asof_date===date));
+  rows.push({price_id:uuid(),profile:profile(),symbol,asof_date:date,close,source,fetched_at:new Date().toISOString()});
+  saveStockTrackerPrices(rows);
+}
+
+function addManualSnapshot(){
+  const symbol=normSymbol(document.getElementById('manualSymbol').value);
+  const date=document.getElementById('manualDate').value;
+  const close=parseFloat(document.getElementById('manualClose').value)||0;
+  if(!symbol||!date||close<=0){toast('Valid symbol, date, and close required','error');return;}
+  const watchlistId=selectedWatchlistId();
+  if(watchlistId&&!activeSymbols(watchlistId).some(s=>s.symbol===symbol)){
+    const rows=loadStockTrackerSymbols();
+    rows.push({symbol_id:uuid(),profile:profile(),watchlist_id:watchlistId,symbol,label:symbol,kind:'Other',active:true,added_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+    saveStockTrackerSymbols(rows);
+  }
+  addSnapshot(symbol,date,close,'manual');
+  document.getElementById('manualClose').value='0';
+  render();
+  toast(`Snapshot added for ${symbol}`);
+}
+
+async function fetchSelectedWatchlistPrices(){
+  const symbols=activeSymbols();
+  if(!symbols.length){toast('Add symbols first','error');return;}
+  const btn=document.getElementById('fetchTrackerBtn');
+  btn.disabled=true;btn.textContent='⏳ Fetching…';
+  let fetched=0,failed=[];
+  for(const s of symbols){
+    try{const q=await fetchOneTicker(s.symbol);addSnapshot(s.symbol,q.asof_date,q.close,'finnhub');fetched++;}
+    catch(e){failed.push(s.symbol);}
+  }
+  btn.disabled=false;btn.textContent='🔄 Fetch Prices';
+  render();
+  if(failed.length) toast(`Fetched ${fetched}. Failed: ${failed.join(', ')}`,'info');
+  else toast(`Prices updated for ${fetched} symbol(s)`);
+}
+
+function buildChartData(symbols){
+  const dates=[...new Set(symbols.flatMap(s=>symbolSnapshots(s.symbol).map(p=>p.asof_date)))].sort();
+  const datasets=symbols.map((s,i)=>({
+    label:s.symbol,
+    borderColor:CHART_COLORS[i%CHART_COLORS.length],
+    backgroundColor:'transparent',
+    data:dates.map(d=>{const snap=symbolSnapshots(s.symbol).filter(p=>p.asof_date<=d).pop();return snap?parseFloat(snap.close)||null:null;}),
+    tension:0.25,spanGaps:true,pointRadius:2,pointHoverRadius:5,borderWidth:2
+  }));
+  return {dates,datasets};
+}
+
+function render(){
+  const watchlists=activeWatchlists();
+  let selected=selectedWatchlistId();
+  if(selected&&!watchlists.some(w=>w.watchlist_id===selected)) selected=watchlists[0]?.watchlist_id||'';
+  const sel=document.getElementById('watchlistSel');
+  sel.innerHTML=watchlists.map(w=>`<option value="${escapeAttr(w.watchlist_id)}" ${w.watchlist_id===selected?'selected':''}>${escapeHtml(w.name)}</option>`).join('');
+  const symbols=activeSymbols(selected);
+  document.getElementById('trackerCount').textContent=`${symbols.length} symbol${symbols.length===1?'':'s'}`;
+
+  document.getElementById('watchlistKPIs').innerHTML=watchlists.map(w=>{
+    const count=activeSymbols(w.watchlist_id).length;
+    return `<div class="watch-card"><div class="watch-name">${escapeHtml(w.name)}</div><div class="watch-meta">${count} symbol${count===1?'':'s'}${w.notes?` | ${escapeHtml(w.notes)}`:''}</div></div>`;
+  }).join('') || '<div class="watch-card"><div class="watch-name">No watchlists</div><div class="watch-meta">Create one above</div></div>';
+
+  let html='<thead><tr><th>Symbol</th><th>Type</th><th>Latest</th><th>Since First</th><th>Snapshots</th><th></th></tr></thead><tbody>';
+  if(!symbols.length) html+='<tr><td colspan="6" class="text-muted" style="text-align:center;padding:16px">No symbols in this watchlist.</td></tr>';
+  symbols.forEach(s=>{
+    const first=firstSnapshot(s.symbol), latest=latestSnapshot(s.symbol);
+    const pct=first&&latest&&first.close>0?((latest.close-first.close)/first.close*100):0;
+    html+=`<tr>
+      <td class="bold">${escapeHtml(s.symbol)}<div class="text-muted" style="font-size:0.76rem">${escapeHtml(s.label||'')}</div></td>
+      <td>${escapeHtml(s.kind||'')}</td>
+      <td>${latest?`${escapeHtml(latest.asof_date)} @ ${fmt(latest.close)}`:'—'}</td>
+      <td class="${pct>0?'pos':pct<0?'neg':''} bold">${latest&&first?fmtPct(pct):'—'}</td>
+      <td>${symbolSnapshots(s.symbol).length}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="removeTrackedSymbol(${jsArg(s.symbol_id)})">Remove</button></td>
+    </tr>`;
+  });
+  html+='</tbody>';
+  document.getElementById('symbolsTable').innerHTML=html;
+
+  const snaps=symbols.flatMap(s=>symbolSnapshots(s.symbol).slice(-8).map(p=>({...p,label:s.label}))).sort((a,b)=>b.asof_date.localeCompare(a.asof_date));
+  let phtml='<thead><tr><th>Date</th><th>Symbol</th><th>Close</th><th>Source</th></tr></thead><tbody>';
+  if(!snaps.length) phtml+='<tr><td colspan="4" class="text-muted" style="text-align:center;padding:16px">No price snapshots yet.</td></tr>';
+  snaps.forEach(p=>{phtml+=`<tr><td>${escapeHtml(p.asof_date)}</td><td class="bold">${escapeHtml(p.symbol)}</td><td>${fmt(p.close)}</td><td>${escapeHtml(p.source||'')}</td></tr>`;});
+  phtml+='</tbody>';
+  document.getElementById('snapshotsTable').innerHTML=phtml;
+
+  renderChart(symbols);
+}
+
+function renderChart(symbols){
+  if(window.trackerChart){window.trackerChart.destroy();window.trackerChart=null;}
+  const empty=document.getElementById('trackerChartEmpty'), wrap=document.getElementById('trackerChartWrap');
+  const {dates,datasets}=buildChartData(symbols);
+  if(!symbols.length||!dates.length){empty.style.display='block';empty.textContent=symbols.length?'Fetch or add snapshots to draw price movement.':'Create a watchlist and add symbols to begin tracking.';wrap.style.display='none';return;}
+  empty.style.display='none';wrap.style.display='block';
+  window.trackerChart=new Chart(document.getElementById('trackerChart'),{
+    type:'line',
+    data:{labels:dates.map(d=>new Date(d).toLocaleDateString('en-SG',{month:'short',day:'numeric',year:'2-digit'})),datasets},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#8b949e',font:{size:11}}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${fmt(ctx.raw)}`}}},scales:{x:{ticks:{color:'#8b949e',maxTicksLimit:12},grid:{color:'rgba(255,255,255,0.05)'}},y:{ticks:{color:'#8b949e'},grid:{color:'rgba(255,255,255,0.05)'}}}}
+  });
+}
+
+function exportTrackerExcel(){
+  exportToExcel([
+    {name:'Watchlists',data:loadStockWatchlists().filter(r=>r.profile===profile())},
+    {name:'Tracked Symbols',data:loadStockTrackerSymbols().filter(r=>r.profile===profile())},
+    {name:'Tracker Prices',data:loadStockTrackerPrices().filter(r=>r.profile===profile())},
+  ]);
+}
+
+async function refreshFromDrive(){const overlay=document.getElementById('loadingOverlay');const msg=document.getElementById('loadingMsg');if(overlay){overlay.style.display='flex';overlay.style.opacity='1';}if(msg)msg.textContent='Refreshing from Google Drive…';await loadFromDrive();}
+window.onProfileChange=function(){if(window.trackerChart){window.trackerChart.destroy();window.trackerChart=null;}};
+window.onDataLoaded=render;
+</script>
+</body>
+</html>

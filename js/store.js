@@ -25,7 +25,8 @@ let _driveLoadFailed = false;
 function emptyDb() {
   return {
     finance_records:[], finance_categories:[], useless_expenses:[],
-    stock_transactions:[], stock_prices:[], assets_master:[],
+    stock_transactions:[], stock_prices:[], stock_watchlists:[],
+    stock_tracker_symbols:[], stock_tracker_prices:[], assets_master:[],
     asset_values:[], investment_data:[],
   };
 }
@@ -312,6 +313,9 @@ function loadCategories()        { return (_db.finance_categories && _db.finance
 function loadUselessExpenses()   { return _db.useless_expenses   || []; }
 function loadStockTransactions() { return _db.stock_transactions || []; }
 function loadStockPrices()       { return _db.stock_prices       || []; }
+function loadStockWatchlists()   { return _db.stock_watchlists   || []; }
+function loadStockTrackerSymbols() { return _db.stock_tracker_symbols || []; }
+function loadStockTrackerPrices()  { return _db.stock_tracker_prices  || []; }
 function loadAssetsMaster()      { return _db.assets_master      || []; }
 function loadAssetValues()       { return _db.asset_values       || []; }
 function loadInvestmentData()    { return _db.investment_data    || []; }
@@ -322,6 +326,9 @@ function saveCategories(arr)        { _db.finance_categories = arr; markUnsaved(
 function saveUselessExpenses(arr)   { _db.useless_expenses   = arr; }
 function saveStockTransactions(arr) { _db.stock_transactions = arr; markUnsaved(); }
 function saveStockPrices(arr)       { _db.stock_prices       = arr; markUnsaved(); }
+function saveStockWatchlists(arr)   { _db.stock_watchlists   = arr; markUnsaved(); }
+function saveStockTrackerSymbols(arr) { _db.stock_tracker_symbols = arr; markUnsaved(); }
+function saveStockTrackerPrices(arr)  { _db.stock_tracker_prices  = arr; markUnsaved(); }
 function saveAssetsMaster(arr)      { _db.assets_master      = arr; markUnsaved(); }
 function saveAssetValues(arr)       { _db.asset_values       = arr; markUnsaved(); }
 function saveInvestmentData(arr)    { _db.investment_data    = arr; markUnsaved(); }
@@ -339,6 +346,9 @@ function exportAllData() {
     { name:'useless_expenses',   data: loadUselessExpenses() },
     { name:'stock_transactions', data: loadStockTransactions() },
     { name:'stock_prices',       data: loadStockPrices() },
+    { name:'stock_watchlists',   data: loadStockWatchlists() },
+    { name:'stock_tracker_symbols', data: loadStockTrackerSymbols() },
+    { name:'stock_tracker_prices',  data: loadStockTrackerPrices() },
     { name:'assets_master',      data: loadAssetsMaster() },
     { name:'asset_values',       data: loadAssetValues() },
     { name:'investment_data',    data: loadInvestmentData() },
