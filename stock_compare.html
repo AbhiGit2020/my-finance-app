@@ -28,8 +28,8 @@
     <a href="index.html" class="">Dashboard</a>
     <a href="input.html" class="">Finance Input</a>
     <a href="investments.html" class="">Investments</a>
-    <a href="stocks.html" class="">Stocks</a>
-    <a href="stock_tracker.html" class="">Tracker</a>
+    <a href="stocks.html" class="">Portfolio</a>
+    <a href="stock_tracker.html" class="">Watchlists</a>
     <a href="stock_compare.html" class="active">Compare</a>
     <a href="assets.html" class="">Assets</a>
   </div>
@@ -43,6 +43,8 @@
       <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
       <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">💾</button>
       <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
+      <button class="btn btn-sm btn-ghost" onclick="exportJsonBackup()" title="Export JSON backup">⬇ JSON</button>
+      <button class="btn btn-sm btn-ghost" onclick="importJsonBackup()" title="Import JSON backup">⬆ JSON</button>
     </div>
   </div>
 </nav>
@@ -78,7 +80,7 @@
         </div>
         <div class="form-group">
           <label>Baseline Date</label>
-          <input type="date" id="baselineDate" class="input-md" value="2025-01-01">
+          <input type="date" id="baselineDate" class="input-md" value="2025-01-01" readonly>
         </div>
         <div class="form-group">
           <label>Close</label>
@@ -88,6 +90,7 @@
           <button class="btn btn-secondary" onclick="saveBaseline()">Save Baseline</button>
         </div>
       </div>
+      <div class="tbl-wrap" style="margin-top:12px"><table id="baselineHelperTable"></table></div>
     </div>
   </details>
 
@@ -131,7 +134,7 @@ function uniqueTrackedSymbols(){
   return Object.values(map);
 }
 function snapshots(symbol){return loadStockTrackerPrices().filter(p=>p.profile===profile()&&p.symbol===symbol).sort((a,b)=>a.asof_date.localeCompare(b.asof_date)||new Date(a.fetched_at||0)-new Date(b.fetched_at||0));}
-function baseline(symbol){return snapshots(symbol).find(p=>p.asof_date===BASELINE_DATE)||snapshots(symbol).find(p=>p.asof_date===document.getElementById('baselineDate').value)||null;}
+function baseline(symbol){return snapshots(symbol).find(p=>p.asof_date===BASELINE_DATE)||null;}
 function latest(symbol){const rows=snapshots(symbol);return rows[rows.length-1]||null;}
 
 async function fetchOneTicker(symbol){
@@ -163,13 +166,22 @@ function toggleSymbol(symbol,checked){
 
 function saveBaseline(){
   const symbol=normSymbol(document.getElementById('baselineSymbol').value);
-  const date=document.getElementById('baselineDate').value || BASELINE_DATE;
+  const date=BASELINE_DATE;
   const close=parseFloat(document.getElementById('baselineClose').value)||0;
   if(!symbol||close<=0){toast('Valid symbol and close required','error');return;}
   upsertPrice(symbol,date,close,'baseline');
   document.getElementById('baselineClose').value='0';
   render();
   toast(`Baseline saved for ${symbol}`);
+}
+
+function saveBaselineFor(symbol){
+  const input=[...document.querySelectorAll('.baseline-helper-close')].find(el=>el.dataset.symbol===symbol);
+  const close=parseFloat(input?.value)||0;
+  if(close<=0){toast(`Valid Jan 1 2025 close required for ${symbol}`,'error');return;}
+  upsertPrice(symbol,BASELINE_DATE,close,'baseline');
+  render();
+  toast(`Jan 1 2025 baseline saved for ${symbol}`);
 }
 
 async function fetchSelectedCurrentPrices(){
@@ -227,6 +239,7 @@ function render(){
 
   const rows=comparisonRows();
   document.getElementById('compareCount').textContent=`${rows.length}/10 selected`;
+  renderBaselineHelper(rows);
 
   let html='<thead><tr><th>Symbol</th><th>Jan 1 2025</th><th>Latest</th><th>% Move</th><th>Status</th></tr></thead><tbody>';
   if(!rows.length) html+='<tr><td colspan="5" class="text-muted" style="text-align:center;padding:16px">Select tracked symbols to compare.</td></tr>';
@@ -243,6 +256,24 @@ function render(){
   html+='</tbody>';
   document.getElementById('compareTable').innerHTML=html;
   renderChart(rows);
+}
+
+function renderBaselineHelper(rows){
+  const el=document.getElementById('baselineHelperTable');
+  if(!el) return;
+  let html='<thead><tr><th>Selected Symbol</th><th>Jan 1 2025 Close</th><th>Status</th><th></th></tr></thead><tbody>';
+  if(!rows.length) html+='<tr><td colspan="4" class="text-muted" style="text-align:center;padding:12px">Select symbols above to prepare baselines.</td></tr>';
+  rows.forEach(r=>{
+    const existing=r.baselinePrice>0;
+    html+=`<tr>
+      <td class="bold">${escapeHtml(r.symbol)}</td>
+      <td><input type="number" class="input-md baseline-helper-close" data-symbol="${escapeAttr(r.symbol)}" min="0" step="0.01" value="${existing?escapeAttr(r.baselinePrice):''}" placeholder="Close"></td>
+      <td class="${existing?'pos':'text-muted'}">${existing?`Saved ${escapeHtml(r.baseline.asof_date)}`:'Missing'}</td>
+      <td><button class="btn btn-sm btn-secondary" onclick="saveBaselineFor(${jsArg(r.symbol)})">Save</button></td>
+    </tr>`;
+  });
+  html+='</tbody>';
+  el.innerHTML=html;
 }
 
 function renderChart(rows){

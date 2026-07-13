@@ -28,8 +28,8 @@
     <a href="index.html" class="">Dashboard</a>
     <a href="input.html" class="">Finance Input</a>
     <a href="investments.html" class="">Investments</a>
-    <a href="stocks.html" class="active">Stocks</a>
-    <a href="stock_tracker.html" class="">Tracker</a>
+    <a href="stocks.html" class="active">Portfolio</a>
+    <a href="stock_tracker.html" class="">Watchlists</a>
     <a href="stock_compare.html" class="">Compare</a>
     <a href="assets.html" class="">Assets</a>
   </div>
@@ -43,6 +43,8 @@
       <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
       <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">💾</button>
       <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
+      <button class="btn btn-sm btn-ghost" onclick="exportJsonBackup()" title="Export JSON backup">⬇ JSON</button>
+      <button class="btn btn-sm btn-ghost" onclick="importJsonBackup()" title="Import JSON backup">⬆ JSON</button>
     </div>
   </div>
 </nav>
@@ -181,14 +183,17 @@ function computeHoldings(txns){
   const positions={}, realized={};
   [...txns].sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(r=>{
     const t=r.ticker; const qty=parseFloat(r.qty)||0; const price=parseFloat(r.price)||0;
-    if(!positions[t]){positions[t]={qty:0,cost:0};realized[t]=0;}
-    if(r.action==='BUY'){positions[t].qty+=qty;positions[t].cost+=qty*price;}
-    else{const avg=positions[t].qty?positions[t].cost/positions[t].qty:0;realized[t]+=qty*(price-avg);positions[t].qty-=qty;positions[t].cost-=qty*avg;}
+    const currency=String(r.currency||'SGD').toUpperCase();
+    const priceSgd=price*appStockFxToSgd(currency);
+    if(!positions[t]){positions[t]={qty:0,cost:0,currency};realized[t]=0;}
+    positions[t].currency=currency;
+    if(r.action==='BUY'){positions[t].qty+=qty;positions[t].cost+=qty*priceSgd;}
+    else{const avg=positions[t].qty?positions[t].cost/positions[t].qty:0;realized[t]+=qty*(priceSgd-avg);positions[t].qty-=qty;positions[t].cost-=qty*avg;}
   });
   const rows=[], realRows=[];
   Object.entries(positions).forEach(([t,v])=>{
     const avg=v.qty?v.cost/v.qty:0;
-    if(v.qty>0.0001) rows.push({ticker:t,qty:v.qty,avg_cost:avg,cost_basis:v.cost,realized_pnl:realized[t]||0});
+    if(v.qty>0.0001) rows.push({ticker:t,qty:v.qty,currency:v.currency||'SGD',avg_cost:avg,cost_basis:v.cost,realized_pnl:realized[t]||0});
     if((realized[t]||0)!==0) realRows.push({ticker:t,realized_pnl:realized[t],open_qty:v.qty});
   });
   return {holdings:rows, realRows};
@@ -258,18 +263,19 @@ function render(){
   const rows=holdings.map(h=>{
     const p=latestPrices[h.ticker]||{};
     const close=parseFloat(p.close)||0;
+    const closeSgd=close*appStockFxToSgd(h.currency);
     const wkRef=parseFloat(p.wk_ref)||0;
     const moRef=parseFloat(p.mo_ref)||0;
     const ytdRef=parseFloat(p.ytd_ref)||0;
     return {
-      ...h, close, wk_ref:wkRef, mo_ref:moRef, ytd_ref:ytdRef,
+      ...h, close, close_sgd:closeSgd, wk_ref:wkRef, mo_ref:moRef, ytd_ref:ytdRef,
       asof_date:p.asof_date||'',
-      market_value:h.qty*close,
-      unrealized_pnl:(close-h.avg_cost)*h.qty,
+      market_value:h.qty*closeSgd,
+      unrealized_pnl:(closeSgd-h.avg_cost)*h.qty,
       weekly_pct:pct(close,wkRef),
       monthly_pct:pct(close,moRef),
       ytd_pct:pct(close,ytdRef),
-      total_return_pct:pct(close,h.avg_cost),
+      total_return_pct:pct(closeSgd,h.avg_cost),
     };
   });
 
@@ -291,14 +297,14 @@ function render(){
   kpiGrid.innerHTML=kpis.map(k=>`<div class="kpi ${k.cls==='neutral'?'teal':k.cls==='pos'?'green':'red'}"><div class="kpi-label">${k.label}</div><div class="kpi-value ${k.cls}">${k.val}</div></div>`).join('');
 
   // Holdings table
-  const cols=['Ticker','Qty','Avg Cost','Close','Mkt Value','Unrealized P&L','Realized P&L','Wk%','Mo%','YTD%','Return%','As Of'];
+  const cols=['Ticker','Qty','CCY','Avg Cost S$','Close','Close S$','Mkt Value S$','Unrealized P&L','Realized P&L','Wk%','Mo%','YTD%','Return%','As Of'];
   let html=`<thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
-  if(!rows.length) html+='<tr><td colspan="12" class="text-muted" style="text-align:center;padding:20px">No holdings. Add a BUY transaction above.</td></tr>';
+  if(!rows.length) html+='<tr><td colspan="14" class="text-muted" style="text-align:center;padding:20px">No holdings. Add a BUY transaction above.</td></tr>';
   rows.forEach(r=>{
     const pctCls=(v)=>v>0?'pos':v<0?'neg':'';
     html+=`<tr>
       <td class="bold">${escapeHtml(r.ticker)}</td>
-      <td>${fmt(r.qty,4)}</td><td>${fmt(r.avg_cost)}</td><td>${fmt(r.close)}</td>
+      <td>${fmt(r.qty,4)}</td><td>${escapeHtml(r.currency)}</td><td>${fmt(r.avg_cost)}</td><td>${fmt(r.close)}</td><td>${fmt(r.close_sgd)}</td>
       <td class="bold">${fmtN(r.market_value)}</td>
       <td class="${pctCls(r.unrealized_pnl)}">${fmt(r.unrealized_pnl)}</td>
       <td class="${pctCls(r.realized_pnl)}">${fmt(r.realized_pnl)}</td>
@@ -519,8 +525,10 @@ function buildPortfolioChart() {
     const positions = {};
     sortedTxns.forEach(t => {
       if (t.date > dateStr) return;
-      if (!positions[t.ticker]) positions[t.ticker] = {qty:0, cost:0};
-      if (t.action==='BUY') { positions[t.ticker].qty += parseFloat(t.qty)||0; positions[t.ticker].cost += (parseFloat(t.qty)||0)*(parseFloat(t.price)||0); }
+      const currency=String(t.currency||'SGD').toUpperCase();
+      if (!positions[t.ticker]) positions[t.ticker] = {qty:0, cost:0, currency};
+      positions[t.ticker].currency=currency;
+      if (t.action==='BUY') { positions[t.ticker].qty += parseFloat(t.qty)||0; positions[t.ticker].cost += (parseFloat(t.qty)||0)*(parseFloat(t.price)||0)*appStockFxToSgd(currency); }
       else { const avg=positions[t.ticker].qty?positions[t.ticker].cost/positions[t.ticker].qty:0; positions[t.ticker].qty-=parseFloat(t.qty)||0; positions[t.ticker].cost-=(parseFloat(t.qty)||0)*avg; }
     });
     return positions;
@@ -558,7 +566,7 @@ function buildPortfolioChart() {
       else if (useRefPrice === 'mo') price = parseFloat(p.mo_ref)  || parseFloat(p.close) || 0;
       else if (useRefPrice === 'wk') price = parseFloat(p.wk_ref)  || parseFloat(p.close) || 0;
       else price = parseFloat(p.close) || 0;
-      const val = qty * price;
+      const val = qty * price * appStockFxToSgd(pos[ticker]?.currency);
       byStock[ticker] = val;
       total += val;
     });

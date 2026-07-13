@@ -12,6 +12,7 @@ const SS_TOKEN  = 'hf_gtoken';
 const SS_EXPIRY = 'hf_gtoken_exp';
 const SS_FOLDER = 'hf_gfolder';
 const SS_FILE   = 'hf_gfile';
+const STOCK_FX_TO_SGD = { SGD:1, USD:1.35, EUR:1.46, INR:0.0161, GBP:1.72, HKD:0.173, AUD:0.91 };
 
 let _db          = emptyDb();
 let _accessToken = null;
@@ -360,6 +361,85 @@ function exportJsonBackup() {
   a.href = URL.createObjectURL(blob);
   a.download = `MyFinance_Backup_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
+}
+function appStockFxToSgd(currency) {
+  return STOCK_FX_TO_SGD[String(currency || 'SGD').toUpperCase()] || 1;
+}
+function importJsonBackup() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.onchange = () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid JSON backup');
+        const knownKeys = Object.keys(emptyDb());
+        const hasKnownData = knownKeys.some(k => Array.isArray(data[k]));
+        if (!hasKnownData) throw new Error('This file does not look like a MyFinance backup');
+        if (!confirm('Import this JSON backup into the app? Review the data, then click Save to Drive if it looks right.')) return;
+        _db = { ...emptyDb(), ...data };
+        if (!(_db.finance_categories && _db.finance_categories.length)) _db.finance_categories = seedCategories(2024);
+        _driveLoadFailed = false;
+        _dataReady = true;
+        markUnsaved();
+        showStatus('JSON imported — review, then save to Drive', 'var(--yellow)');
+        triggerRender();
+      } catch (e) {
+        console.error('importJsonBackup:', e);
+        alert('Could not import this JSON backup. Please choose a valid MyFinance JSON file.');
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+function appHealthSnapshot() {
+  const db = { ...emptyDb(), ..._db };
+  const profiles = PROFILES;
+  const stockTx = db.stock_transactions || [];
+  const stockPrices = db.stock_prices || [];
+  const openHoldings = [];
+  profiles.forEach(profile => {
+    const positions = {};
+    stockTx.filter(t => t.profile === profile).sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(t => {
+      const ticker = String(t.ticker || '').toUpperCase();
+      if (!ticker) return;
+      if (!positions[ticker]) positions[ticker] = { qty:0 };
+      const qty = parseFloat(t.qty) || 0;
+      if (t.action === 'BUY') positions[ticker].qty += qty;
+      else positions[ticker].qty -= qty;
+    });
+    Object.entries(positions).forEach(([ticker,pos]) => {
+      if (pos.qty > 0.0001) openHoldings.push({ profile, ticker });
+    });
+  });
+  const priceKeys = new Set(stockPrices.map(p => `${p.profile || 'Abhi'}|${String(p.ticker || '').toUpperCase()}`));
+  const missingStockPrices = openHoldings.filter(h => !priceKeys.has(`${h.profile}|${h.ticker}`));
+  const tracked = (db.stock_tracker_symbols || []).filter(s => s.active !== false);
+  const trackerPrices = db.stock_tracker_prices || [];
+  const baselineKeys = new Set(trackerPrices.filter(p => p.asof_date === '2025-01-01' && parseFloat(p.close) > 0).map(p => `${p.profile || 'Abhi'}|${String(p.symbol || '').toUpperCase()}`));
+  const trackedKeys = [...new Map(tracked.map(s => [`${s.profile || 'Abhi'}|${String(s.symbol || '').toUpperCase()}`, s])).values()];
+  const missingCompareBaselines = trackedKeys.filter(s => !baselineKeys.has(`${s.profile || 'Abhi'}|${String(s.symbol || '').toUpperCase()}`));
+  return {
+    signedIn:_signedIn,
+    unsaved:_unsavedChanges,
+    driveLoadFailed:_driveLoadFailed,
+    lastSaveTime:_lastSaveTime,
+    counts:{
+      finance_records:db.finance_records.length,
+      investment_data:db.investment_data.length,
+      stock_transactions:db.stock_transactions.length,
+      stock_prices:db.stock_prices.length,
+      tracked_symbols:tracked.length,
+      assets:db.assets_master.length + db.asset_values.length,
+    },
+    missingStockPrices,
+    missingCompareBaselines,
+  };
 }
 
 // ── UUID & constants ──────────────────────────────────────

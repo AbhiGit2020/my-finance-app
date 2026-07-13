@@ -33,8 +33,8 @@
     <a href="index.html" class="active">Dashboard</a>
     <a href="input.html" class="">Finance Input</a>
     <a href="investments.html" class="">Investments</a>
-    <a href="stocks.html" class="">Stocks</a>
-    <a href="stock_tracker.html" class="">Tracker</a>
+    <a href="stocks.html" class="">Portfolio</a>
+    <a href="stock_tracker.html" class="">Watchlists</a>
     <a href="stock_compare.html" class="">Compare</a>
     <a href="assets.html" class="">Assets</a>
   </div>
@@ -48,12 +48,16 @@
       <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
       <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">💾</button>
       <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
+      <button class="btn btn-sm btn-ghost" onclick="exportJsonBackup()" title="Export JSON backup">⬇ JSON</button>
+      <button class="btn btn-sm btn-ghost" onclick="importJsonBackup()" title="Import JSON backup">⬆ JSON</button>
     </div>
   </div>
 </nav>
 
 <div class="page">
   <div class="page-title">📊 Dashboard</div>
+
+  <div class="lifetime-grid" id="dataHealth"></div>
 
   <!-- Lifetime KPIs -->
   <div class="lifetime-grid" id="lifetimeKPIs"></div>
@@ -116,7 +120,40 @@ function getAnnualTotals(year) {
   return { income, outgoing, invested, savings: income - outgoing - invested };
 }
 
+function renderDataHealth() {
+  const h = appHealthSnapshot();
+  const counts = h.counts;
+  const lastSaved = h.lastSaveTime ? new Date(h.lastSaveTime).toLocaleTimeString() : 'Not saved yet';
+  const totalRecords = Object.values(counts).reduce((s,v)=>s+v,0);
+  const saveColor = h.driveLoadFailed ? 'var(--red)' : h.unsaved ? 'var(--yellow)' : 'var(--green)';
+  const priceColor = h.missingStockPrices.length ? 'var(--yellow)' : 'var(--green)';
+  const baselineColor = h.missingCompareBaselines.length ? 'var(--yellow)' : 'var(--green)';
+  document.getElementById('dataHealth').innerHTML = `
+    <div class="lkpi" style="border-color:${saveColor}">
+      <div class="lkpi-label">Data Health</div>
+      <div class="lkpi-value" style="color:${saveColor};font-size:1.1rem">${h.driveLoadFailed?'Load Blocked':h.unsaved?'Unsaved':'Saved'}</div>
+      <div class="lkpi-sub">${h.signedIn?'Drive connected':'Not signed in'} · ${escapeHtml(lastSaved)}</div>
+    </div>
+    <div class="lkpi">
+      <div class="lkpi-label">Records</div>
+      <div class="lkpi-value" style="color:var(--teal);font-size:1.1rem">${fmt(totalRecords)}</div>
+      <div class="lkpi-sub">Finance ${fmt(counts.finance_records)} · Stocks ${fmt(counts.stock_transactions)} · Assets ${fmt(counts.assets)}</div>
+    </div>
+    <div class="lkpi" style="border-color:${priceColor}">
+      <div class="lkpi-label">Stock Prices</div>
+      <div class="lkpi-value" style="color:${priceColor};font-size:1.1rem">${h.missingStockPrices.length?fmt(h.missingStockPrices.length):'OK'}</div>
+      <div class="lkpi-sub">${h.missingStockPrices.length?'Open holdings missing current price':'All open holdings have prices'}</div>
+    </div>
+    <div class="lkpi" style="border-color:${baselineColor}">
+      <div class="lkpi-label">Compare Baselines</div>
+      <div class="lkpi-value" style="color:${baselineColor};font-size:1.1rem">${h.missingCompareBaselines.length?fmt(h.missingCompareBaselines.length):'OK'}</div>
+      <div class="lkpi-sub">${h.missingCompareBaselines.length?'Tracked symbols missing Jan 1 2025':'Tracked symbols have baselines'}</div>
+    </div>
+  `;
+}
+
 function render() {
+  renderDataHealth();
   const years = getYears();
   if(!years.length) {
     renderEmpty();
@@ -184,9 +221,11 @@ function render() {
     // compute holdings
     const positions = {};
     [...ptxns].sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(t=>{
-      if(!positions[t.ticker]) positions[t.ticker]={qty:0,cost:0};
+      const currency=String(t.currency||'SGD').toUpperCase();
+      if(!positions[t.ticker]) positions[t.ticker]={qty:0,cost:0,currency};
+      positions[t.ticker].currency=currency;
       const qty=parseFloat(t.qty)||0, price=parseFloat(t.price)||0;
-      if(t.action==='BUY'){positions[t.ticker].qty+=qty;positions[t.ticker].cost+=qty*price;}
+      if(t.action==='BUY'){positions[t.ticker].qty+=qty;positions[t.ticker].cost+=qty*price*appStockFxToSgd(currency);}
       else{const avg=positions[t.ticker].qty?positions[t.ticker].cost/positions[t.ticker].qty:0;positions[t.ticker].qty-=qty;positions[t.ticker].cost-=qty*avg;}
     });
     Object.entries(positions).forEach(([ticker,pos])=>{
@@ -194,10 +233,11 @@ function render() {
       const p=priceMap[ticker];
       if(!p) return;
       const close=parseFloat(p.close)||0;
-      const mv=pos.qty*close;
+      const closeSgd=close*appStockFxToSgd(pos.currency);
+      const mv=pos.qty*closeSgd;
       const avgCost=pos.qty?pos.cost/pos.qty:0;
       totalStockValue+=mv;
-      totalUnrealized+=(close-avgCost)*pos.qty;
+      totalUnrealized+=(closeSgd-avgCost)*pos.qty;
     });
   });
 
@@ -464,6 +504,7 @@ function renderDrill(year) {
 }
 
 function renderEmpty() {
+  renderDataHealth();
   document.getElementById('lifetimeKPIs').innerHTML = `
     <div class="lkpi" style="grid-column:1/-1;text-align:center;padding:40px">
       <div class="lkpi-label">No data yet</div>
