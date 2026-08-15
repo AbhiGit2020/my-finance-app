@@ -16,7 +16,7 @@
   <div class="nav-links">
     <a href="index.html" class="">Dashboard</a>
     <a href="input.html" class="active">Finance Input</a>
-    <a href="investments.html" class="">Investments</a>
+    <a href="input.html?section=investments" class="">Investments</a>
     <a href="stocks.html" class="">Portfolio</a>
     <a href="stock_tracker.html" class="">Watchlists</a>
     <a href="stock_compare.html" class="">Compare</a>
@@ -52,6 +52,7 @@
       <div class="flex flex-gap" style="gap:8px">
         <button id="btnIncoming" class="btn btn-primary" onclick="setSection('incoming')">💰 Incoming</button>
         <button id="btnOutgoing" class="btn btn-secondary" onclick="setSection('outgoing')">💸 Expenses</button>
+        <button id="btnInvestments" class="btn btn-secondary" onclick="setSection('investments')">📈 Investments</button>
       </div>
     </div>
     <div style="margin-left:auto; display:flex; gap:8px; align-items:flex-end">
@@ -117,8 +118,8 @@
     </div>
   </details>
 
-  <!-- Calculator helper -->
-  <details>
+  <!-- Calculator helper (incoming/outgoing only) -->
+  <details id="calcPanel">
     <summary>🧮 Calculator Helper (comma-separated sum)</summary>
     <div class="details-content">
       <div class="form-row">
@@ -141,6 +142,33 @@
     </div>
   </details>
 
+  <!-- FX Currency Converter (investments only) -->
+  <details id="fxPanel" class="hidden">
+    <summary>💱 FX Currency Converter (apply to cell)</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group"><label>Investment</label><select id="fxInv" class="input-md"></select></div>
+        <div class="form-group"><label>Metric</label>
+          <select id="fxMetric" class="input-md">
+            <option>Monthly Investment</option><option>Market Value</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Month</label><select id="fxMonth" class="input-md"></select></div>
+        <div class="form-group"><label>Amount</label><input type="number" id="fxAmount" class="input-md" value="0" step="100"></div>
+        <div class="form-group"><label>From</label>
+          <select id="fxFrom" class="input-sm"><option>USD</option><option>SGD</option><option>INR</option></select>
+        </div>
+        <div class="form-group"><label>To</label>
+          <select id="fxTo" class="input-sm"><option>SGD</option><option>USD</option><option>INR</option></select>
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="applyFX()">Apply → Cell</button>
+        </div>
+      </div>
+      <p id="fxResult" class="text-muted" style="font-size:0.83rem;margin-top:4px"></p>
+    </div>
+  </details>
+
   <hr class="divider">
 
   <!-- Editable pivot table -->
@@ -153,12 +181,12 @@
 
   <!-- Monthly totals -->
   <div class="card mt-16">
-    <div class="card-title">Monthly Totals</div>
+    <div class="card-title" id="totalsTitle">Monthly Totals</div>
     <div class="tbl-wrap"><table id="totalsTable"></table></div>
   </div>
 
-  <!-- Category totals by year -->
-  <div class="card">
+  <!-- Category totals by year (incoming/outgoing only) -->
+  <div class="card" id="histCard">
     <div class="card-title">Category Totals by Year</div>
     <div class="tbl-wrap"><table id="histTable"></table></div>
   </div>
@@ -209,7 +237,14 @@
 // ── State ─────────────────────────────────────────────────
 let currentYear = new Date().getFullYear();
 let currentSection = 'incoming';
-let pivotData = []; // [{Category, Jan..Dec}]
+let pivotData = []; // [{Category, Jan..Dec}] — incoming/outgoing
+let invTableData = []; // flat rows: {invName, metric, Jan..Dec, status, invType} — investments
+
+// FX rates for the Investments FX helper
+const FX = {
+  'USD-SGD':1.35, 'SGD-USD':0.741, 'USD-INR':84.0, 'INR-USD':0.0119,
+  'SGD-INR':62.2, 'INR-SGD':0.0161,
+};
 
 // ── Init ──────────────────────────────────────────────────
 const yearSel = document.getElementById('selYear');
@@ -220,9 +255,12 @@ for(let y=currentYear-5;y<=currentYear+10;y++){
   yearSel.appendChild(o);
 }
 MONTHS.forEach(m => {
-  const o = document.createElement('option');
-  o.value=m; o.textContent=m;
-  document.getElementById('calcMonth').appendChild(o);
+  const o1 = document.createElement('option');
+  o1.value=m; o1.textContent=m;
+  document.getElementById('calcMonth').appendChild(o1);
+  const o2 = document.createElement('option');
+  o2.value=m; o2.textContent=m;
+  document.getElementById('fxMonth').appendChild(o2);
 });
 
 // Set default date for useless expense
@@ -242,6 +280,15 @@ function fmt(n) { return Number(n||0).toLocaleString('en-SG',{minimumFractionDig
 
 function getActiveCats() {
   const y = parseInt(yearSel.value);
+  if (currentSection === 'investments') {
+    // Retired investments stay visible through their retirement year (end_year
+    // inclusive), same convention as investments.html used to have.
+    return loadCategories().filter(c =>
+      c.section === 'investments' &&
+      c.start_year <= y &&
+      (c.end_year === null || c.end_year === undefined || c.end_year >= y)
+    ).sort((a,b) => a.order - b.order);
+  }
   return loadCategories().filter(c =>
     c.section === currentSection &&
     c.active &&
@@ -268,6 +315,171 @@ function loadPivot() {
     });
     return row;
   });
+}
+
+function loadPivotForSection() {
+  if (currentSection === 'investments') loadInvestmentTableData();
+  else loadPivot();
+}
+
+// ── Investments (merged in from the old investments.html) ─
+function computeInvCumulative(mVals, startingBalance=0) {
+  let running = startingBalance; const out = {};
+  MONTHS.forEach(m => { running += parseFloat(mVals[m])||0; out[m] = running; });
+  return out;
+}
+
+// Sum of all monthly_investment amounts booked in years before `year` — the
+// since-inception capital carried into this year, so Cumulative Investment
+// doesn't reset to 0 every January while Market Value keeps the full balance.
+function getPriorYearsInvested(category, year, profile) {
+  return loadInvestmentData()
+    .filter(r=>r.category===category && r.metric==='monthly_investment' && r.year<year && (r.profile||'Abhi')===profile)
+    .reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+}
+
+function loadInvestmentTableData() {
+  const year = parseInt(yearSel.value);
+  const cats = getActiveCats();
+  const profile = getActiveProfile();
+  const stored = loadInvestmentData().filter(r=>r.year===year && (r.profile||'Abhi')===profile);
+  const BANDS = ['🔵','🟢','🟡','🟣','🟠'];
+  invTableData = [];
+  cats.forEach((cat,i) => {
+    const band = BANDS[i%BANDS.length];
+    const status = cat.active ? 'Active' : 'Inactive';
+
+    const miRow = { invName:cat.category, metric:'Monthly Investment', band, status, invType:cat.type };
+    MONTHS.forEach(m => { const r=stored.find(s=>s.category===cat.category&&s.metric==='monthly_investment'&&s.month===MONTHS.indexOf(m)+1); miRow[m]=r?r.amount:0; });
+    invTableData.push(miRow);
+
+    const priorTotal = getPriorYearsInvested(cat.category, year, profile);
+    const cum = computeInvCumulative(miRow, priorTotal);
+    invTableData.push({ invName:cat.category, metric:'Cumulative Investment', band, status, invType:cat.type, ...cum });
+
+    const mvRow = { invName:cat.category, metric:'Market Value', band, status, invType:cat.type };
+    MONTHS.forEach(m => { const r=stored.find(s=>s.category===cat.category&&s.metric==='market_value'&&s.month===MONTHS.indexOf(m)+1); mvRow[m]=r?r.amount:0; });
+    invTableData.push(mvRow);
+  });
+}
+
+function renderInvestmentPivot() {
+  const table = document.getElementById('pivotTable');
+  let html = '<thead><tr><th></th><th style="text-align:left">Investment</th><th style="text-align:left">Type</th><th style="text-align:left">Metric</th>';
+  MONTHS.forEach(m=>html+=`<th>${m}</th>`);
+  html += '<th>YTD</th></tr></thead><tbody>';
+
+  let lastInv = '';
+  invTableData.forEach(row => {
+    const isCum = row.metric==='Cumulative Investment';
+    const isMI = row.metric==='Monthly Investment';
+    const editable = isMI || row.metric==='Market Value';
+
+    if (row.invName !== lastInv) {
+      if (lastInv !== '') html += '<tr style="height:6px"><td colspan="100"></td></tr>';
+      lastInv = row.invName;
+    }
+
+    html += `<tr data-inv="${escapeAttr(row.invName)}" data-metric="${escapeAttr(row.metric)}" class="${row.status==='Inactive'?'text-muted':''}">`;
+    html += `<td>${escapeHtml(row.band)}</td>`;
+    html += `<td style="text-align:left;font-weight:600">${isMI?escapeHtml(row.invName):''}</td>`;
+    html += `<td style="text-align:left;font-size:0.78rem;color:var(--text-muted)">${isMI?escapeHtml(row.invType):''}</td>`;
+    html += `<td style="text-align:left;font-size:0.82rem;color:${isCum?'var(--text-muted)':'inherit'}">${escapeHtml(row.metric)}</td>`;
+
+    MONTHS.forEach(m => {
+      const v = row[m]||0;
+      if (editable && row.status!=='Inactive') {
+        html += `<td><input type="number" min="0" step="1" value="${escapeAttr(v)}" data-inv="${escapeAttr(row.invName)}" data-metric="${escapeAttr(row.metric)}" data-month="${escapeAttr(m)}" onchange="onInvCellChange(this)"></td>`;
+      } else {
+        html += `<td class="mono" style="color:var(--text-muted);font-size:0.82rem">${fmt(v)}</td>`;
+      }
+    });
+
+    const ytd = MONTHS.reduce((s,m2)=>s+(parseFloat(row[m2])||0),0);
+    html += `<td class="bold mono">${fmt(ytd)}</td></tr>`;
+  });
+  html += '</tbody>';
+  table.innerHTML = html;
+  renderInvestmentSummary();
+  renderManageSel();
+  renderFxSelectors();
+}
+
+function onInvCellChange(input) {
+  const inv = input.dataset.inv, metric = input.dataset.metric, month = input.dataset.month;
+  const val = parseFloat(input.value)||0;
+  const row = invTableData.find(r=>r.invName===inv&&r.metric===metric);
+  if (row) row[month] = val;
+
+  if (metric === 'Monthly Investment') {
+    const miRow = invTableData.find(r=>r.invName===inv&&r.metric==='Monthly Investment');
+    if (miRow) {
+      const year = parseInt(yearSel.value);
+      const priorTotal = getPriorYearsInvested(inv, year, getActiveProfile());
+      const cum = computeInvCumulative(miRow, priorTotal);
+      const cumRow = invTableData.find(r=>r.invName===inv&&r.metric==='Cumulative Investment');
+      if (cumRow) Object.assign(cumRow, cum);
+    }
+  }
+  renderInvestmentPivot();
+}
+
+function renderInvestmentSummary() {
+  const active = invTableData.filter(r=>r.status==='Active');
+  const mi = active.filter(r=>r.metric==='Monthly Investment');
+  const ci = active.filter(r=>r.metric==='Cumulative Investment');
+  const mv = active.filter(r=>r.metric==='Market Value');
+  const sumMonth = (rows,m) => rows.reduce((s,r)=>s+(parseFloat(r[m])||0),0);
+
+  const table = document.getElementById('totalsTable');
+  let html = '<thead><tr><th>Metric</th>';
+  MONTHS.forEach(m=>html+=`<th>${m}</th>`);
+  html += '<th>Dec/Latest</th></tr></thead><tbody>';
+
+  [
+    {label:'Total Monthly Investment', rows:mi},
+    {label:'Total Cumulative Investment', rows:ci},
+    {label:'Total Market Value', rows:mv},
+  ].forEach(({label,rows}) => {
+    html += `<tr><td>${label}</td>`;
+    MONTHS.forEach(m=>html+=`<td>${fmt(sumMonth(rows,m))}</td>`);
+    html += `<td class="bold">${fmt(sumMonth(rows,'Dec'))}</td></tr>`;
+  });
+
+  html += '<tr class="total-row"><td>Gain / Loss %</td>';
+  MONTHS.forEach(m => {
+    const inv = sumMonth(ci,m), mkt = sumMonth(mv,m);
+    const pctVal = inv!==0 ? (mkt-inv)/inv*100 : 0;
+    html += `<td class="${pctVal>0?'pos':pctVal<0?'neg':''}">${pctVal.toFixed(1)}%</td>`;
+  });
+  const invDec = sumMonth(ci,'Dec'), mktDec = sumMonth(mv,'Dec');
+  const pctDec = invDec!==0 ? (mktDec-invDec)/invDec*100 : 0;
+  html += `<td class="${pctDec>0?'pos':pctDec<0?'neg':''} bold">${pctDec.toFixed(1)}%</td></tr>`;
+  html += '</tbody>';
+  table.innerHTML = html;
+}
+
+function renderFxSelectors() {
+  const cats = getActiveCats();
+  const sel = document.getElementById('fxInv');
+  if (sel) sel.innerHTML = cats.map(c=>`<option>${escapeHtml(c.category)}</option>`).join('');
+}
+
+function applyFX() {
+  const inv = document.getElementById('fxInv').value;
+  const metric = document.getElementById('fxMetric').value;
+  const month = document.getElementById('fxMonth').value;
+  const amount = parseFloat(document.getElementById('fxAmount').value)||0;
+  const from = document.getElementById('fxFrom').value;
+  const to = document.getElementById('fxTo').value;
+  const rate = FX[`${from}-${to}`];
+  if (!rate) { toast('FX pair not supported','error'); return; }
+  const converted = Math.round(amount*rate*100)/100;
+  const row = invTableData.find(r=>r.invName===inv&&r.metric===metric);
+  if (row) row[month] = converted;
+  renderInvestmentPivot();
+  document.getElementById('fxResult').textContent = `${amount} ${from} → ${converted} ${to} applied to ${inv} (${metric}, ${month})`;
+  toast('FX applied — remember to Save');
 }
 
 // ── Render pivot ──────────────────────────────────────────
@@ -444,6 +656,7 @@ function deleteUE(id) {
 
 // ── Save pivot ────────────────────────────────────────────
 function savePivot() {
+  if (currentSection === 'investments') { saveInvestmentPivot(); return; }
   const year = parseInt(yearSel.value);
   const cats = getActiveCats();
   const catNames = cats.map(c=>c.category);
@@ -471,6 +684,33 @@ function savePivot() {
 
 }
 
+function saveInvestmentPivot() {
+  const year = parseInt(yearSel.value);
+  const now = new Date().toISOString();
+  const METRIC_CODE = {'Monthly Investment':'monthly_investment', 'Market Value':'market_value'};
+  const editableNames = [...new Set(invTableData.filter(row=>row.status!=='Inactive'&&METRIC_CODE[row.metric]).map(row=>row.invName))];
+  const profile = getActiveProfile();
+  let stored = loadInvestmentData().filter(r=>!((r.profile||'Abhi')===profile && r.year===year && editableNames.includes(r.category)));
+
+  invTableData.forEach(row => {
+    if (row.status==='Inactive') return;
+    if (!METRIC_CODE[row.metric]) return;
+    MONTHS.forEach((m,i) => {
+      const val = parseFloat(row[m])||0;
+      if (val===0) return;
+      stored.push({
+        record_id: uuid(), year, month: i+1,
+        profile, category: row.invName, metric: METRIC_CODE[row.metric],
+        type: 'investment', amount: val,
+        created_at: now, updated_at: now,
+      });
+    });
+  });
+  saveInvestmentData(stored);
+  renderInvestmentSummary();
+  driveSync().then(ok => toast(ok ? '✅ Investments saved to Drive' : 'Saved locally (sign in to sync)'));
+}
+
 // ── Category management ───────────────────────────────────
 function addCategory() {
   const name = document.getElementById('newCatName').value.trim();
@@ -478,8 +718,20 @@ function addCategory() {
   const cats = loadCategories();
   const exists = cats.find(c=>c.category.toLowerCase()===name.toLowerCase()&&c.section===currentSection);
   if(exists){
-    if(!exists.active){ exists.active=true; exists.end_year=null; saveCategories(cats); toast(`Re-activated: ${name}`); renderAll(); return; }
-    toast('Category already exists','error'); return;
+    if(!exists.active){ exists.active=true; exists.end_year=null; saveCategories(cats); toast(`Re-activated: ${name}`); loadPivotForSection(); renderAll(); return; }
+    toast(currentSection==='investments'?'Investment already exists':'Category already exists','error'); return;
+  }
+  if (currentSection === 'investments') {
+    const type = document.getElementById('newCatType').value;
+    const maxOrder = cats.filter(c=>c.section==='investments').reduce((m,c)=>Math.max(m,c.order),0);
+    const startYear = parseInt(document.getElementById('newCatYear').value)||currentYear;
+    cats.push({ category_id:uuid(), section:'investments', group:'Investments', type, category:name, order:maxOrder+1, active:true, start_year:startYear, end_year:null, notes:'' });
+    saveCategories(cats);
+    loadPivotForSection();
+    renderAll();
+    document.getElementById('newCatName').value='';
+    toast(`Added: ${name}`);
+    return;
   }
   const grp = currentSection==='outgoing' ? document.getElementById('newCatGroup').value : 'Primary';
   const type = currentSection==='outgoing' ? document.getElementById('newCatType').value : 'income';
@@ -504,6 +756,25 @@ function hideCategory() {
   const cats = loadCategories();
   const cat = cats.find(c=>c.category===name && c.section===currentSection);
   if(!cat){ toast('Not found','error'); return; }
+
+  if (currentSection === 'investments') {
+    const valStr = prompt(`Retiring "${name}". Enter its value (S$) when stopped — this amount will be withdrawn to a Cash / Savings asset. Leave as 0 if there's nothing to withdraw.`, '0');
+    if (valStr === null) return; // cancelled
+    const value = parseFloat(valStr)||0;
+    if (value < 0) { toast('Value cannot be negative','error'); return; }
+    cat.active=false; cat.end_year=parseInt(yearSel.value);
+    cat.retired_value=value; cat.retired_date=new Date().toISOString();
+    saveCategories(cats);
+    if (value > 0) {
+      withdrawInvestmentToSavings(getActiveProfile(), name, value);
+      toast(`Retired: ${name} — S$ ${fmt(value)} withdrawn to Cash / Savings`);
+    } else {
+      toast(`Retired: ${name}`);
+    }
+    loadPivotForSection(); renderAll();
+    return;
+  }
+
   cat.active=false; cat.end_year=parseInt(yearSel.value);
   saveCategories(cats);
   loadPivot(); renderAll();
@@ -514,6 +785,15 @@ function deleteCategory() {
   const name = document.getElementById('manageCatSel').value;
   if(!confirm(`Delete "${name}" and all its records? This cannot be undone.`)) return;
   let cats = loadCategories().filter(c=>!(c.category===name && c.section===currentSection));
+
+  if (currentSection === 'investments') {
+    let inv = loadInvestmentData().filter(r=>!((r.profile||'Abhi')===getActiveProfile() && r.category===name));
+    saveCategories(cats); saveInvestmentData(inv);
+    loadPivotForSection(); renderAll();
+    toast(`Deleted: ${name}`, 'info');
+    return;
+  }
+
   let recs = loadFinanceRecords().filter(r=>!((r.profile || 'Abhi')===getActiveProfile() && r.category===name && recordMatchesSection(r.type, currentSection)));
   saveCategories(cats); saveFinanceRecords(recs);
   loadPivot(); renderAll();
@@ -539,6 +819,15 @@ function renameCategory() {
   if (!cat) { toast('Category not found', 'error'); return; }
   cat.category = newName;
   saveCategories(cats);
+
+  if (currentSection === 'investments') {
+    let inv = loadInvestmentData().map(r => ((r.profile||'Abhi')===getActiveProfile() && r.category===oldName) ? {...r, category:newName} : r);
+    saveInvestmentData(inv);
+    loadPivotForSection(); renderAll();
+    toast(`Renamed: "${oldName}" → "${newName}"`);
+    return;
+  }
+
   // Rename in all finance records for this section only
   let recs = loadFinanceRecords().map(r => ((r.profile || 'Abhi')===getActiveProfile() && r.category === oldName && recordMatchesSection(r.type, currentSection)) ? {...r, category: newName} : r);
   saveFinanceRecords(recs);
@@ -572,7 +861,16 @@ function applyCalc() {
 // ── Export section ────────────────────────────────────────
 function exportSectionExcel() {
   const year = parseInt(yearSel.value);
-  const cats = getActiveCats();
+  if (currentSection === 'investments') {
+    const data = invTableData.map(row => {
+      const out = { Investment:row.invName, Type:row.invType, Metric:row.metric, Status:row.status };
+      MONTHS.forEach(m=>out[m]=row[m]||0);
+      out['YTD'] = MONTHS.reduce((s,m)=>s+(row[m]||0),0);
+      return out;
+    });
+    exportToExcel([{ name: `Investments_${year}`, data }]);
+    return;
+  }
   const data = pivotData.map(row => {
     const out = { Category: row.Category };
     MONTHS.forEach(m=>{ out[m]=row[m]||0; });
@@ -583,21 +881,40 @@ function exportSectionExcel() {
 }
 
 // ── Section toggle ────────────────────────────────────────
+function refreshCatTypeOptions() {
+  const sel = document.getElementById('newCatType');
+  if (currentSection === 'investments') {
+    sel.innerHTML = ['Equities','ETFs','Mutual Funds','Equity Portfolios','Unit Trusts','Real Estate','Cryptos','Other']
+      .map(t=>`<option>${t}</option>`).join('');
+  } else {
+    sel.innerHTML = '<option value="expense">expense</option><option value="tax">tax</option>';
+  }
+}
+
 function setSection(sec) {
   currentSection = sec;
   document.getElementById('btnIncoming').className = sec==='incoming'?'btn btn-primary':'btn btn-secondary';
   document.getElementById('btnOutgoing').className = sec==='outgoing'?'btn btn-primary':'btn btn-secondary';
+  document.getElementById('btnInvestments').className = sec==='investments'?'btn btn-primary':'btn btn-secondary';
   document.getElementById('groupDiv').style.display = sec==='outgoing'?'':'none';
-  document.getElementById('typeDiv').style.display = sec==='outgoing'?'':'none';
+  document.getElementById('typeDiv').style.display = (sec==='outgoing'||sec==='investments')?'':'none';
   document.getElementById('discSection').classList.toggle('hidden', sec!=='outgoing');
-  loadPivot(); renderAll();
+  document.getElementById('calcPanel').classList.toggle('hidden', sec==='investments');
+  document.getElementById('fxPanel').classList.toggle('hidden', sec!=='investments');
+  document.getElementById('histCard').classList.toggle('hidden', sec==='investments');
+  document.getElementById('pivotTitle').textContent = sec==='investments' ? 'Edit Monthly Investment & Market Value' : 'Edit Monthly Values';
+  document.getElementById('totalsTitle').textContent = sec==='investments' ? 'Portfolio Summary' : 'Monthly Totals';
+  refreshCatTypeOptions();
+  loadPivotForSection();
+  renderAll();
 }
 
 function onYearChange() {
-  loadPivot(); renderAll();
+  loadPivotForSection(); renderAll();
 }
 
 function renderAll() {
+  if (currentSection === 'investments') { renderInvestmentPivot(); return; }
   renderPivot();
   renderHistTable();
   if(currentSection==='outgoing') renderDisc();
@@ -614,7 +931,11 @@ async function refreshFromDrive() {
 }
 
 
-window.onDataLoaded = function() { setSection('incoming'); };
+window.onDataLoaded = function() {
+  const params = new URLSearchParams(location.search);
+  const sec = params.get('section');
+  setSection(sec==='investments'||sec==='outgoing' ? sec : 'incoming');
+};
 </script>
 </body>
 </html>
