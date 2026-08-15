@@ -109,7 +109,6 @@
 <div class="toast-container" id="toastContainer"></div>
 
 <script>
-const FINNHUB_KEY = 'd7lgg9hr01qm7o0bp0d0d7lgg9hr01qm7o0bp0dg';
 const COMPARE_KEY = 'hf_compare_symbols';
 const BASELINE_DATE = '2025-01-01';
 const CHART_COLORS = ['#068a91','#3fb950','#d29922','#f85149','#a371f7','#58a6ff','#fb8500','#2dc653','#f778ba','#8ddb8c'];
@@ -138,7 +137,9 @@ function baseline(symbol){return snapshots(symbol).find(p=>p.asof_date===BASELIN
 function latest(symbol){const rows=snapshots(symbol);return rows[rows.length-1]||null;}
 
 async function fetchOneTicker(symbol){
-  const res=await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_KEY}`);
+  const key=getFinnhubKey();
+  if(!key) throw new Error('Missing Finnhub API key');
+  const res=await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${key}`);
   if(!res.ok) throw new Error('quote fetch failed');
   const q=await res.json();
   const close=parseFloat(q.c)||0;

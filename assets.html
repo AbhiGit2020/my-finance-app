@@ -79,6 +79,7 @@
             <option>Property</option>
             <option>Provident Fund</option>
             <option>Retirement Fund</option>
+            <option>Cash / Savings</option>
             <option>Gold</option>
             <option>Medical Fund</option>
             <option>Other Non-Liquid</option>
@@ -152,6 +153,14 @@ function latestValue(assetId){
   const sorted=[...vals].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const last=sorted[sorted.length-1];
   return {value:parseFloat(last.value_sgd)||0,date:last.date};
+}
+
+// Most recently dated valuation within a given month's entries (not max, not first-found —
+// so the monthly breakdown always agrees with "latest value" shown elsewhere on this page).
+function monthLatestValue(monthVals){
+  if(!monthVals.length) return null;
+  const sorted=[...monthVals].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  return parseFloat(sorted[sorted.length-1].value_sgd)||0;
 }
 
 // ── Create/manage assets ──────────────────────────────────
@@ -260,15 +269,11 @@ function render(){
   thtml+='<th>Latest</th></tr></thead><tbody>';
 
   active.sort((a,b)=>{
-    const typeOrder={'Property':1,'Provident Fund':2,'Retirement Fund':3,'Medical Fund':4,'Gold':5,'Other Non-Liquid':6,'Other':7};
+    const typeOrder={'Property':1,'Provident Fund':2,'Retirement Fund':3,'Cash / Savings':4,'Medical Fund':5,'Gold':6,'Other Non-Liquid':7,'Other':8};
     return (typeOrder[a.asset_type]||9)-(typeOrder[b.asset_type]||9)||(a.asset_name>b.asset_name?1:-1);
   }).forEach(asset=>{
     const yearVals=allVals.filter(v=>v.asset_id===asset.asset_id&&v.year===year);
-    const monthly=monthLabels.map((_,i)=>{
-      const monthVals=yearVals.filter(v=>v.month===i+1);
-      if(!monthVals.length) return null;
-      return Math.max(...monthVals.map(v=>parseFloat(v.value_sgd)||0));
-    });
+    const monthly=monthLabels.map((_,i)=>monthLatestValue(yearVals.filter(v=>v.month===i+1)));
     const {value:latestVal}=latestValue(asset.asset_id);
     thtml+=`<tr><td class="bold">${escapeHtml(asset.asset_name)}</td><td class="text-muted">${escapeHtml(asset.asset_type)}</td><td class="text-muted">${escapeHtml(asset.owner)}</td>`;
     monthly.forEach(v=>thtml+=`<td class="${v?'':'text-muted'}">${v!==null?fmt(v):'—'}</td>`);
@@ -280,8 +285,8 @@ function render(){
   monthLabels.forEach((_,i)=>{
     const monthTotal=active.reduce((s,asset)=>{
       const yearVals=allVals.filter(v=>v.asset_id===asset.asset_id&&v.year===year&&v.month===i+1);
-      if(!yearVals.length) return s;
-      return s+Math.max(...yearVals.map(v=>parseFloat(v.value_sgd)||0));
+      const v=monthLatestValue(yearVals);
+      return s+(v||0);
     },0);
     thtml+=`<td class="bold">${monthTotal>0?fmt(monthTotal):'—'}</td>`;
   });
@@ -296,11 +301,7 @@ function render(){
   active.forEach(asset=>{
     const{value:latestVal,date:latestDate}=latestValue(asset.asset_id);
     const yearVals=allVals.filter(v=>v.asset_id===asset.asset_id&&v.year===year).sort((a,b)=>new Date(b.date)-new Date(a.date));
-    const monthly=monthLabels.map((_,i)=>{
-      const mv=yearVals.filter(v=>v.month===i+1);
-      if(!mv.length) return 0;
-      return mv[mv.length-1].value_sgd;
-    });
+    const monthly=monthLabels.map((_,i)=>monthLatestValue(yearVals.filter(v=>v.month===i+1))||0);
 
     boxHTML+=`<div class="asset-card">
       <div class="asset-card-header">

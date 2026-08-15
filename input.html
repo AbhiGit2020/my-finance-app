@@ -26,7 +26,7 @@
     <span id="driveStatus" class="drive-status-text"></span>
     <span id="authStatus" class="auth-badge"></span>
     <div class="nav-btn-row">
-      
+      <select class="global-profile-sel profile-sel-nav"></select>
       <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">🔑 Sign in</button>
       <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">🔄</button>
       <button class="btn btn-sm btn-teal" onclick="savePivot()" title="Save to Drive">☁ Save</button>
@@ -259,7 +259,7 @@ function getActiveCats() {
 function loadPivot() {
   const year = parseInt(yearSel.value);
   const cats = getActiveCats();
-  const recs = loadFinanceRecords().filter(r=>r.year===year);
+  const recs = getProfileRecords().filter(r=>r.year===year);
   pivotData = cats.map(cat => {
     const row = { Category: cat.category };
     MONTHS.forEach((m,i) => {
@@ -361,7 +361,7 @@ function renderCalcCat() {
 // ── Historical pivot ──────────────────────────────────────
 function renderHistTable() {
   const cats = getActiveCats();
-  const recs = loadFinanceRecords();
+  const recs = getProfileRecords();
   const years = [...new Set(recs.map(r=>r.year))].sort();
   if(!years.length) { document.getElementById('histTable').innerHTML='<tr><td class="text-muted">No historical data yet.</td></tr>'; return; }
 
@@ -385,7 +385,7 @@ function renderHistTable() {
 // ── Discretionary ─────────────────────────────────────────
 function renderDisc() {
   const year = parseInt(yearSel.value);
-  const ue = loadUselessExpenses().filter(e=>e.year===year);
+  const ue = loadUselessExpenses().filter(e=>e.year===year && (e.profile || 'Abhi') === getActiveProfile());
   document.getElementById('ueYear').textContent = year;
 
   const monthly = Array(12).fill(0);
@@ -422,7 +422,7 @@ function addUselessExpense() {
   const d = new Date(dateVal);
   const arr = loadUselessExpenses();
   arr.push({
-    entry_id: uuid(), date: dateVal,
+    entry_id: uuid(), profile: getActiveProfile(), date: dateVal,
     year: d.getFullYear(), month: d.getMonth()+1,
     amount_sgd: amount, note,
     created_at: new Date().toISOString(),
@@ -436,7 +436,7 @@ function addUselessExpense() {
 }
 
 function deleteUE(id) {
-  let arr = loadUselessExpenses().filter(e=>e.entry_id!==id);
+  let arr = loadUselessExpenses().filter(e=>!(e.entry_id===id && (e.profile || 'Abhi') === getActiveProfile()));
   saveUselessExpenses(arr);
   renderDisc();
   toast('Entry deleted');
@@ -447,7 +447,8 @@ function savePivot() {
   const year = parseInt(yearSel.value);
   const cats = getActiveCats();
   const catNames = cats.map(c=>c.category);
-  let records = loadFinanceRecords().filter(r=>!(r.year===year && catNames.includes(r.category)));
+  const profile = getActiveProfile();
+  let records = loadFinanceRecords().filter(r=>!((r.profile || 'Abhi')===profile && r.year===year && catNames.includes(r.category)));
   const now = new Date().toISOString();
 
   pivotData.forEach(row => {
@@ -458,7 +459,7 @@ function savePivot() {
       if(val===0) return;
       records.push({
         record_id: uuid(), year, month: i+1,
-        type: cat.type, category: row.Category,
+        profile, type: cat.type, category: row.Category,
         amount: val, notes: '',
         created_at: now, updated_at: now,
       });
@@ -492,10 +493,16 @@ function addCategory() {
   toast(`Added: ${name}`);
 }
 
+// A record's type tells us which section it belongs to — used so
+// delete/hide/rename never touch a same-named category in the other section.
+function recordMatchesSection(recordType, section) {
+  return section === 'incoming' ? recordType === 'income' : (recordType === 'expense' || recordType === 'tax');
+}
+
 function hideCategory() {
   const name = document.getElementById('manageCatSel').value;
   const cats = loadCategories();
-  const cat = cats.find(c=>c.category===name);
+  const cat = cats.find(c=>c.category===name && c.section===currentSection);
   if(!cat){ toast('Not found','error'); return; }
   cat.active=false; cat.end_year=parseInt(yearSel.value);
   saveCategories(cats);
@@ -506,8 +513,8 @@ function hideCategory() {
 function deleteCategory() {
   const name = document.getElementById('manageCatSel').value;
   if(!confirm(`Delete "${name}" and all its records? This cannot be undone.`)) return;
-  let cats = loadCategories().filter(c=>c.category!==name);
-  let recs = loadFinanceRecords().filter(r=>r.category!==name);
+  let cats = loadCategories().filter(c=>!(c.category===name && c.section===currentSection));
+  let recs = loadFinanceRecords().filter(r=>!((r.profile || 'Abhi')===getActiveProfile() && r.category===name && recordMatchesSection(r.type, currentSection)));
   saveCategories(cats); saveFinanceRecords(recs);
   loadPivot(); renderAll();
   toast(`Deleted: ${name}`, 'info');
@@ -528,12 +535,12 @@ function renameCategory() {
     toast('A category with that name already exists', 'error'); return;
   }
   // Rename in categories
-  const cat = cats.find(c => c.category === oldName);
+  const cat = cats.find(c => c.category === oldName && c.section === currentSection);
   if (!cat) { toast('Category not found', 'error'); return; }
   cat.category = newName;
   saveCategories(cats);
-  // Rename in all finance records
-  let recs = loadFinanceRecords().map(r => r.category === oldName ? {...r, category: newName} : r);
+  // Rename in all finance records for this section only
+  let recs = loadFinanceRecords().map(r => ((r.profile || 'Abhi')===getActiveProfile() && r.category === oldName && recordMatchesSection(r.type, currentSection)) ? {...r, category: newName} : r);
   saveFinanceRecords(recs);
   loadPivot(); renderAll();
   toast(`Renamed: "${oldName}" → "${newName}"`);

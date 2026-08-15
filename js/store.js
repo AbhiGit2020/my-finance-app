@@ -12,7 +12,18 @@ const SS_TOKEN  = 'hf_gtoken';
 const SS_EXPIRY = 'hf_gtoken_exp';
 const SS_FOLDER = 'hf_gfolder';
 const SS_FILE   = 'hf_gfile';
+const SS_FINNHUB = 'hf_finnhub_key';
 const STOCK_FX_TO_SGD = { SGD:1, USD:1.35, EUR:1.46, INR:0.0161, GBP:1.72, HKD:0.173, AUD:0.91 };
+
+// ── Finnhub API key (kept out of source — stored locally only) ──
+function getFinnhubKey() {
+  let key = (localStorage.getItem(SS_FINNHUB) || '').trim();
+  if (!key) {
+    key = (prompt('Enter your Finnhub API key (free at finnhub.io). It is stored only in this browser\'s local storage, never in the app source.') || '').trim();
+    if (key) localStorage.setItem(SS_FINNHUB, key);
+  }
+  return key;
+}
 
 let _db          = emptyDb();
 let _accessToken = null;
@@ -322,9 +333,12 @@ function loadAssetValues()       { return _db.asset_values       || []; }
 function loadInvestmentData()    { return _db.investment_data    || []; }
 
 function saveFinanceRecords(arr)    { _db.finance_records    = arr; markUnsaved(); }
-function getProfileRecords() { return (_db.finance_records||[]).filter(r=>r.profile===getActiveProfile()||!r.profile); }
+function recordProfile(row) { return row && row.profile ? row.profile : 'Abhi'; }
+function getProfileRecords(profile = getActiveProfile()) {
+  return (_db.finance_records||[]).filter(r => recordProfile(r) === profile);
+}
 function saveCategories(arr)        { _db.finance_categories = arr; markUnsaved(); }
-function saveUselessExpenses(arr)   { _db.useless_expenses   = arr; }
+function saveUselessExpenses(arr)   { _db.useless_expenses   = arr; markUnsaved(); }
 function saveStockTransactions(arr) { _db.stock_transactions = arr; markUnsaved(); }
 function saveStockPrices(arr)       { _db.stock_prices       = arr; markUnsaved(); }
 function saveStockWatchlists(arr)   { _db.stock_watchlists   = arr; markUnsaved(); }
@@ -333,6 +347,35 @@ function saveStockTrackerPrices(arr)  { _db.stock_tracker_prices  = arr; markUns
 function saveAssetsMaster(arr)      { _db.assets_master      = arr; markUnsaved(); }
 function saveAssetValues(arr)       { _db.asset_values       = arr; markUnsaved(); }
 function saveInvestmentData(arr)    { _db.investment_data    = arr; markUnsaved(); }
+
+// ── Withdraw a retired investment's value into a Cash / Savings asset ──
+function withdrawInvestmentToSavings(profile, sourceName, amount) {
+  if (!(amount > 0)) return;
+  const assets = loadAssetsMaster();
+  let cash = assets.find(a => a.asset_type === 'Cash / Savings' && a.owner === profile);
+  if (!cash) {
+    const now = new Date().toISOString();
+    cash = {
+      asset_id: uuid(), asset_name: `Cash / Savings (${profile})`, asset_type: 'Cash / Savings',
+      owner: profile, active: true, notes: '', created_at: now, updated_at: now,
+    };
+    assets.push(cash);
+    saveAssetsMaster(assets);
+  }
+  const vals = loadAssetValues();
+  const existing = vals.filter(v => v.asset_id === cash.asset_id).sort((a, b) => new Date(a.date) - new Date(b.date));
+  const currentVal = existing.length ? (parseFloat(existing[existing.length - 1].value_sgd) || 0) : 0;
+  const now = new Date();
+  vals.push({
+    valuation_id: uuid(), asset_id: cash.asset_id, date: now.toISOString().slice(0, 10),
+    year: now.getFullYear(), month: now.getMonth() + 1,
+    value_sgd: currentVal + amount,
+    note: `Withdrawn from retired investment: ${sourceName}`,
+    created_at: now.toISOString(), updated_at: now.toISOString(),
+  });
+  saveAssetValues(vals);
+  return cash;
+}
 
 // ── Excel export ──────────────────────────────────────────
 function exportToExcel(sheets) {
@@ -364,6 +407,18 @@ function exportJsonBackup() {
 }
 function appStockFxToSgd(currency) {
   return STOCK_FX_TO_SGD[String(currency || 'SGD').toUpperCase()] || 1;
+}
+
+// stock_prices now accumulates a dated history per (profile,ticker) instead of
+// one overwritten row, so weekly/monthly/YTD reference prices can be real
+// snapshots instead of all being the same "previous close" value.
+function latestStockPrice(profile, ticker) {
+  const rows = loadStockPrices().filter(p => p.profile === profile && p.ticker === ticker);
+  return rows.reduce((best, r) => (!best || String(r.asof_date||'') > String(best.asof_date||'')) ? r : best, null);
+}
+function stockPriceAsOf(profile, ticker, dateStr) {
+  const rows = loadStockPrices().filter(p => p.profile === profile && p.ticker === ticker && String(p.asof_date||'') <= dateStr);
+  return rows.reduce((best, r) => (!best || String(r.asof_date||'') > String(best.asof_date||'')) ? r : best, null);
 }
 function importJsonBackup() {
   const input = document.createElement('input');

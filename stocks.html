@@ -56,7 +56,7 @@
   <div class="flex flex-gap flex-center mb-16 flex-wrap">
 
     <div style="margin-left:auto;display:flex;gap:8px;align-items:flex-end">
-      <button class="btn btn-primary" id="fetchBtn" onclick="fetchPrices()">🔄 Fetch Yahoo Prices</button>
+      <button class="btn btn-primary" id="fetchBtn" onclick="fetchPrices()">🔄 Fetch Prices</button>
       <button class="btn btn-secondary" onclick="exportStocksExcel()">⬇ Export Excel</button>
     </div>
   </div>
@@ -200,24 +200,30 @@ function computeHoldings(txns){
 }
 
 // ── Finnhub API ───────────────────────────────────────────
-const FINNHUB_KEY = 'd7lgg9hr01qm7o0bp0d0d7lgg9hr01qm7o0bp0dg';
-
+// stock_prices holds a dated snapshot per (profile,ticker,asof_date) rather
+// than a single overwritten row, so weekly/monthly/YTD reference prices are
+// derived from real history instead of all being "previous close".
 async function fetchOneTicker(ticker) {
-  // 1. Get current quote
-  const quoteRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${FINNHUB_KEY}`);
+  const key = getFinnhubKey();
+  if (!key) throw new Error('Missing Finnhub API key');
+  const quoteRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${key}`);
   if (!quoteRes.ok) throw new Error('quote fetch failed');
   const quote = await quoteRes.json();
   if (!quote.c) throw new Error('no price data');
+  return { asof_date: new Date().toISOString().slice(0, 10), close: quote.c };
+}
 
-  const close   = quote.c;   // current price
-  // Use quote data only (free plan - no historical candles)
-  return {
-    asof_date: new Date().toISOString().slice(0, 10),
-    close,
-    wk_ref:  parseFloat(quote.pc) || close,  // prev close as wk reference
-    mo_ref:  parseFloat(quote.pc) || close,
-    ytd_ref: parseFloat(quote.pc) || close,
-  };
+function todayMinusDays(days) {
+  return new Date(Date.now() - days*24*3600*1000).toISOString().slice(0,10);
+}
+function wkRefDate()  { return todayMinusDays(7); }
+function moRefDate()  { return todayMinusDays(30); }
+function ytdRefDate() { return `${new Date().getFullYear()}-01-01`; }
+
+function upsertStockSnapshot(prices, ticker, date, close, source) {
+  const kept = prices.filter(p => !(p.profile === profile() && p.ticker === ticker && p.asof_date === date));
+  kept.push({ profile: profile(), ticker, asof_date: date, close, source, fetched_at: new Date().toISOString() });
+  return kept;
 }
 
 async function fetchPrices() {
@@ -235,8 +241,7 @@ async function fetchPrices() {
   for (const ticker of tickers) {
     try {
       const result = await fetchOneTicker(ticker);
-      prices = prices.filter(p => !(p.profile === profile() && p.ticker === ticker));
-      prices.push({ profile: profile(), ticker, ...result, fetched_at: new Date().toISOString() });
+      prices = upsertStockSnapshot(prices, ticker, result.asof_date, result.close, 'finnhub');
       fetched++;
     } catch(e) {
       failed.push(ticker);
@@ -255,21 +260,23 @@ async function fetchPrices() {
 function render(){
   const txns=loadStockTransactions().filter(r=>r.profile===profile());
   const {holdings,realRows}=computeHoldings(txns);
-  let prices=loadStockPrices().filter(p=>p.profile===profile());
-  const latestPrices={};
-  prices.sort((a,b)=>new Date(a.asof_date)-new Date(b.asof_date)).forEach(p=>{latestPrices[p.ticker]=p;});
+  const wkDate=wkRefDate(), moDate=moRefDate(), ytdDate=ytdRefDate();
 
-  // merge
+  // merge — wk/mo/ytd reference prices are the closest real snapshot on or
+  // before each date, not a single fake duplicated value.
   const rows=holdings.map(h=>{
-    const p=latestPrices[h.ticker]||{};
-    const close=parseFloat(p.close)||0;
+    const latest=latestStockPrice(profile(),h.ticker);
+    const close=parseFloat(latest?.close)||0;
     const closeSgd=close*appStockFxToSgd(h.currency);
-    const wkRef=parseFloat(p.wk_ref)||0;
-    const moRef=parseFloat(p.mo_ref)||0;
-    const ytdRef=parseFloat(p.ytd_ref)||0;
+    const wkSnap=stockPriceAsOf(profile(),h.ticker,wkDate);
+    const moSnap=stockPriceAsOf(profile(),h.ticker,moDate);
+    const ytdSnap=stockPriceAsOf(profile(),h.ticker,ytdDate);
+    const wkRef=wkSnap?parseFloat(wkSnap.close)||close:close;
+    const moRef=moSnap?parseFloat(moSnap.close)||close:close;
+    const ytdRef=ytdSnap?parseFloat(ytdSnap.close)||close:close;
     return {
       ...h, close, close_sgd:closeSgd, wk_ref:wkRef, mo_ref:moRef, ytd_ref:ytdRef,
-      asof_date:p.asof_date||'',
+      asof_date:latest?.asof_date||'',
       market_value:h.qty*closeSgd,
       unrealized_pnl:(closeSgd-h.avg_cost)*h.qty,
       weekly_pct:pct(close,wkRef),
@@ -354,6 +361,12 @@ function renderTransactions(){
 }
 
 // ── Add transaction ───────────────────────────────────────
+function currentQty(ticker,txns){
+  const {holdings}=computeHoldings(txns);
+  const h=holdings.find(x=>x.ticker===ticker);
+  return h?h.qty:0;
+}
+
 function addTransaction(){
   const ticker=document.getElementById('txTicker').value.toUpperCase().trim();
   const action=document.getElementById('txAction').value;
@@ -365,6 +378,12 @@ function addTransaction(){
 
   if(!ticker){toast('Ticker cannot be empty','error');return;}
   if(qty<=0||price<=0){toast('Qty and Price must be > 0','error');return;}
+
+  const existingTxns=loadStockTransactions().filter(r=>r.profile===profile());
+  if(action==='SELL'){
+    const held=currentQty(ticker,existingTxns);
+    if(qty>held+0.0001){ toast(`Cannot sell ${fmt(qty,4)} — only ${fmt(held,4)} held`,'error'); return; }
+  }
 
   const txns=loadStockTransactions();
   txns.push({txn_id:uuid(),profile:profile(),ticker,action,qty,price,currency,date,notes,created_at:new Date().toISOString()});
@@ -378,20 +397,25 @@ function addTransaction(){
 }
 
 // ── Manual price form ─────────────────────────────────────
+// Each field writes a dated snapshot (today / 1wk ago / 1mo ago / Jan 1) into
+// the same history stock_prices uses, so manual entries feed the real Wk/Mo/YTD calc.
 function renderManualPriceForm(tickers){
   if(!tickers.length){document.getElementById('manualPriceForm').innerHTML='<p class="text-muted">Add holdings first.</p>';return;}
   let html='';
-  const prices=loadStockPrices();
+  const wkDate=wkRefDate(), moDate=moRefDate(), ytdDate=ytdRefDate();
   tickers.forEach(ticker=>{
-    const p=prices.find(x=>x.ticker===ticker&&x.profile===profile())||{};
+    const latest=latestStockPrice(profile(),ticker);
+    const wkSnap=stockPriceAsOf(profile(),ticker,wkDate);
+    const moSnap=stockPriceAsOf(profile(),ticker,moDate);
+    const ytdSnap=stockPriceAsOf(profile(),ticker,ytdDate);
     html+=`<div class="panel mb-8">
       <div class="bold mb-8">${escapeHtml(ticker)}</div>
       <div class="form-row">
-        <div class="form-group"><label>Close</label><input type="number" step="0.01" class="input-md" id="mp_close_${escapeAttr(ticker)}" value="${escapeAttr(p.close||0)}"></div>
-        <div class="form-group"><label>1-Wk Ref</label><input type="number" step="0.01" class="input-md" id="mp_wk_${escapeAttr(ticker)}" value="${escapeAttr(p.wk_ref||0)}"></div>
-        <div class="form-group"><label>1-Mo Ref</label><input type="number" step="0.01" class="input-md" id="mp_mo_${escapeAttr(ticker)}" value="${escapeAttr(p.mo_ref||0)}"></div>
-        <div class="form-group"><label>YTD Ref</label><input type="number" step="0.01" class="input-md" id="mp_ytd_${escapeAttr(ticker)}" value="${escapeAttr(p.ytd_ref||0)}"></div>
-        <div class="form-group"><label>As-Of Date</label><input type="date" class="input-md" id="mp_date_${escapeAttr(ticker)}" value="${escapeAttr(p.asof_date||new Date().toISOString().slice(0,10))}"></div>
+        <div class="form-group"><label>Close</label><input type="number" step="0.01" class="input-md" id="mp_close_${escapeAttr(ticker)}" value="${escapeAttr(latest?.close||0)}"></div>
+        <div class="form-group"><label>1-Wk Ref</label><input type="number" step="0.01" class="input-md" id="mp_wk_${escapeAttr(ticker)}" value="${escapeAttr(wkSnap?.close||0)}"></div>
+        <div class="form-group"><label>1-Mo Ref</label><input type="number" step="0.01" class="input-md" id="mp_mo_${escapeAttr(ticker)}" value="${escapeAttr(moSnap?.close||0)}"></div>
+        <div class="form-group"><label>YTD Ref</label><input type="number" step="0.01" class="input-md" id="mp_ytd_${escapeAttr(ticker)}" value="${escapeAttr(ytdSnap?.close||0)}"></div>
+        <div class="form-group"><label>As-Of Date</label><input type="date" class="input-md" id="mp_date_${escapeAttr(ticker)}" value="${escapeAttr(latest?.asof_date||new Date().toISOString().slice(0,10))}"></div>
         <div class="form-group" style="justify-content:flex-end"><button class="btn btn-secondary btn-sm" onclick="saveManualPrice(${jsArg(ticker)})">Save</button></div>
       </div>
     </div>`;
@@ -400,16 +424,17 @@ function renderManualPriceForm(tickers){
 }
 
 function saveManualPrice(ticker){
-  let prices=loadStockPrices().filter(p=>!(p.profile===profile()&&p.ticker===ticker));
-  prices.push({
-    profile:profile(), ticker,
-    asof_date:document.getElementById(`mp_date_${ticker}`).value,
-    close:parseFloat(document.getElementById(`mp_close_${ticker}`).value)||0,
-    wk_ref:parseFloat(document.getElementById(`mp_wk_${ticker}`).value)||0,
-    mo_ref:parseFloat(document.getElementById(`mp_mo_${ticker}`).value)||0,
-    ytd_ref:parseFloat(document.getElementById(`mp_ytd_${ticker}`).value)||0,
-    fetched_at:new Date().toISOString(),
-  });
+  const dateStr=document.getElementById(`mp_date_${ticker}`).value || new Date().toISOString().slice(0,10);
+  const close=parseFloat(document.getElementById(`mp_close_${ticker}`).value)||0;
+  const wk=parseFloat(document.getElementById(`mp_wk_${ticker}`).value)||0;
+  const mo=parseFloat(document.getElementById(`mp_mo_${ticker}`).value)||0;
+  const ytd=parseFloat(document.getElementById(`mp_ytd_${ticker}`).value)||0;
+
+  let prices=loadStockPrices();
+  if(close>0) prices=upsertStockSnapshot(prices,ticker,dateStr,close,'manual');
+  if(wk>0)    prices=upsertStockSnapshot(prices,ticker,wkRefDate(),wk,'manual');
+  if(mo>0)    prices=upsertStockSnapshot(prices,ticker,moRefDate(),mo,'manual');
+  if(ytd>0)   prices=upsertStockSnapshot(prices,ticker,ytdRefDate(),ytd,'manual');
   saveStockPrices(prices);
   render(); toast(`Price saved for ${ticker}`);
 }
@@ -451,10 +476,16 @@ function saveEditTx(id){
   const idx=txns.findIndex(t=>t.txn_id===id);
   if(idx<0){toast('Not found','error');return;}
   const ticker=document.getElementById('et_ticker').value.toUpperCase().trim();
+  const action=document.getElementById('et_action').value;
   const qty=parseFloat(document.getElementById('et_qty').value)||0;
   const price=parseFloat(document.getElementById('et_price').value)||0;
   if(!ticker||qty<=0||price<=0){toast('Invalid values','error');return;}
-  txns[idx]={...txns[idx],ticker,action:document.getElementById('et_action').value,qty,price,currency:document.getElementById('et_currency').value,date:document.getElementById('et_date').value,notes:document.getElementById('et_notes').value};
+  if(action==='SELL'){
+    const others=txns.filter((t,i)=>i!==idx&&t.profile===profile());
+    const held=currentQty(ticker,others);
+    if(qty>held+0.0001){ toast(`Cannot sell ${fmt(qty,4)} — only ${fmt(held,4)} held`,'error'); return; }
+  }
+  txns[idx]={...txns[idx],ticker,action,qty,price,currency:document.getElementById('et_currency').value,date:document.getElementById('et_date').value,notes:document.getElementById('et_notes').value};
   saveStockTransactions(txns);
   render(); toast('Transaction updated ✓');
 }
@@ -534,38 +565,28 @@ function buildPortfolioChart() {
     return positions;
   }
 
-  // Build 4-point timeline from stored price data
-  const priceMap = {};
-  storedPrices.forEach(p => { priceMap[p.ticker] = p; });
-
-  // Timeline points: buy dates + reference points from stored prices
+  // Timeline points: buy dates + reference points, all sorted
   const buyDates = [...new Set(txns.map(t=>t.date))].sort();
-  
-  // Get reference dates from prices
-  const samplePrice = storedPrices[0];
-  const asofDate = samplePrice?.asof_date || today;
+  const latestAsof = storedPrices.reduce((max,p)=>p.asof_date>max?p.asof_date:max, storedPrices[0].asof_date);
   const curYear = new Date().getFullYear();
   const ytdDate = `${curYear}-01-01`;
-  const moDate  = new Date(Date.now() - 30*24*3600*1000).toISOString().slice(0,10);
-  const wkDate  = new Date(Date.now() -  7*24*3600*1000).toISOString().slice(0,10);
+  const moDate  = moRefDate();
+  const wkDate  = wkRefDate();
 
-  // Combine: unique buy dates + reference dates, all sorted
-  const allDates = [...new Set([...buyDates, ytdDate, moDate, wkDate, asofDate])].sort().filter(d => d >= firstDate);
+  const allDates = [...new Set([...buyDates, ytdDate, moDate, wkDate, latestAsof])].sort().filter(d => d >= firstDate);
 
-  function portfolioValueAtDate(dateStr, useRefPrice) {
+  // Value at each date uses the real snapshot closest to (and not after) that
+  // date for every ticker — not a single reused reference price.
+  function portfolioValueAtDate(dateStr) {
     const pos = holdingsAtDate(dateStr);
     let total = 0;
     const byStock = {};
     tickers.forEach(ticker => {
       const qty = pos[ticker]?.qty || 0;
       if (qty <= 0) { byStock[ticker] = 0; return; }
-      let price = 0;
-      const p = priceMap[ticker];
-      if (!p) { byStock[ticker] = 0; return; }
-      if (useRefPrice === 'ytd')  price = parseFloat(p.ytd_ref) || parseFloat(p.close) || 0;
-      else if (useRefPrice === 'mo') price = parseFloat(p.mo_ref)  || parseFloat(p.close) || 0;
-      else if (useRefPrice === 'wk') price = parseFloat(p.wk_ref)  || parseFloat(p.close) || 0;
-      else price = parseFloat(p.close) || 0;
+      const snap = stockPriceAsOf(profile(), ticker, dateStr);
+      if (!snap) { byStock[ticker] = 0; return; }
+      const price = parseFloat(snap.close) || 0;
       const val = qty * price * appStockFxToSgd(pos[ticker]?.currency);
       byStock[ticker] = val;
       total += val;
@@ -573,18 +594,12 @@ function buildPortfolioChart() {
     return { total, byStock };
   }
 
-  // For each date, figure out which price reference to use
   const totalValues = [];
   const stockDatasets = {};
   tickers.forEach(t => stockDatasets[t] = []);
 
   allDates.forEach(dateStr => {
-    let ref = 'close';
-    if (dateStr <= ytdDate) ref = 'ytd';
-    else if (dateStr <= moDate) ref = 'mo';
-    else if (dateStr <= wkDate) ref = 'wk';
-    
-    const { total, byStock } = portfolioValueAtDate(dateStr, ref);
+    const { total, byStock } = portfolioValueAtDate(dateStr);
     totalValues.push(total);
     tickers.forEach(t => stockDatasets[t].push(byStock[t] || 0));
   });

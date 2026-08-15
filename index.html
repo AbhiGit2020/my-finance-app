@@ -42,7 +42,7 @@
     <span id="driveStatus" class="drive-status-text"></span>
     <span id="authStatus" class="auth-badge"></span>
     <div class="nav-btn-row">
-      
+      <select class="global-profile-sel profile-sel-nav"></select>
       <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">🔑 Sign in</button>
       <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">🔄</button>
       <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
@@ -97,8 +97,8 @@ function fmt(n) { return Number(n||0).toLocaleString('en-SG',{minimumFractionDig
 function fmtPct(n) { return Number(n||0).toFixed(1) + '%'; }
 
 function getYears() {
-  const recs = loadFinanceRecords();
-  const invRecs = loadInvestmentData();
+  const recs = getProfileRecords();
+  const invRecs = loadInvestmentData().filter(r => (r.profile || 'Abhi') === getActiveProfile());
   const years = [...new Set([
     ...recs.map(r=>r.year),
     ...invRecs.map(r=>r.year)
@@ -108,14 +108,14 @@ function getYears() {
 
 function getAnnualTotals(year) {
   // Income and expenses from finance records
-  const recs = loadFinanceRecords().filter(r => r.year === year);
+  const recs = getProfileRecords().filter(r => r.year === year);
   let income=0, outgoing=0;
   recs.forEach(r => {
     if(r.type==='income') income += r.amount;
     else if(r.type==='expense' || r.type==='tax') outgoing += r.amount;
   });
   // Investments from investment data (monthly_investment rows only)
-  const invRecs = loadInvestmentData().filter(r => r.year === year && r.metric === 'monthly_investment');
+  const invRecs = loadInvestmentData().filter(r => (r.profile || 'Abhi') === getActiveProfile() && r.year === year && r.metric === 'monthly_investment');
   const invested = invRecs.reduce((s,r) => s + (parseFloat(r.amount)||0), 0);
   return { income, outgoing, invested, savings: income - outgoing - invested };
 }
@@ -173,7 +173,7 @@ function render() {
   const ltInvRate  = avgIncome > 0 ? (ltInvested/ltIncome*100) : 0;
 
   // Current investment market value (latest market_value per investment)
-  const allInvData = loadInvestmentData().filter(r => r.metric === 'market_value');
+  const allInvData = loadInvestmentData().filter(r => (r.profile || 'Abhi') === getActiveProfile() && r.metric === 'market_value');
   const latestMV = {};
   allInvData.sort((a,b)=>a.year!==b.year?a.year-b.year:a.month-b.month).forEach(r=>{
     latestMV[r.category] = parseFloat(r.amount)||0;
@@ -196,6 +196,7 @@ function render() {
     'Property':           ['Property'],
     'Retirement':         ['Retirement Fund'],
     'CPF':                ['Provident Fund'],
+    'Cash':               ['Cash / Savings'],
     'Gold':               ['Gold'],
     'Medical':            ['Medical Fund'],
     'Other':              ['Other Non-Liquid','Other'],
@@ -207,16 +208,12 @@ function render() {
     const group = Object.entries(ASSET_GROUPS).find(([,types])=>types.includes(a.asset_type));
     if(group) assetTotals[group[0]] += val;
   });
-  const totalNetWorth = Object.values(assetTotals).reduce((s,v)=>s+v,0) + currentInvValue;
 
   // Stocks — all profiles
   const allProfiles = ['Abhi','Wife','Kids','Joint'];
   let totalStockValue = 0, totalUnrealized = 0;
   allProfiles.forEach(prof => {
     const ptxns = loadStockTransactions().filter(r=>r.profile===prof);
-    const prices = loadStockPrices().filter(p=>p.profile===prof);
-    const priceMap = {};
-    prices.forEach(p=>priceMap[p.ticker]=p);
     if(!ptxns.length) return;
     // compute holdings
     const positions = {};
@@ -230,7 +227,7 @@ function render() {
     });
     Object.entries(positions).forEach(([ticker,pos])=>{
       if(pos.qty<=0) return;
-      const p=priceMap[ticker];
+      const p=latestStockPrice(prof,ticker);
       if(!p) return;
       const close=parseFloat(p.close)||0;
       const closeSgd=close*appStockFxToSgd(pos.currency);
@@ -274,6 +271,7 @@ function render() {
     ${assetTotals['Property']>0?`<div class="lkpi"><div class="lkpi-label">Property</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Property'])}</div></div>`:''}
     ${assetTotals['CPF']>0?`<div class="lkpi"><div class="lkpi-label">CPF</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['CPF'])}</div></div>`:''}
     ${assetTotals['Retirement']>0?`<div class="lkpi"><div class="lkpi-label">Retirement</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Retirement'])}</div></div>`:''}
+    ${assetTotals['Cash']>0?`<div class="lkpi"><div class="lkpi-label">Cash / Savings</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Cash'])}</div></div>`:''}
     ${assetTotals['Medical']>0?`<div class="lkpi"><div class="lkpi-label">Medisave</div><div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(assetTotals['Medical'])}</div></div>`:''}
     ${assetTotals['Gold']>0?`<div class="lkpi"><div class="lkpi-label">Gold</div><div class="lkpi-value" style="color:var(--yellow)">S$ ${fmt(assetTotals['Gold'])}</div></div>`:''}
     <div class="lkpi" style="border-color:var(--green);background:rgba(63,185,80,0.06)">
@@ -385,12 +383,12 @@ function selectYear(y) {
 
 function renderDrill(year) {
   const t = getAnnualTotals(year);
-  const recs = loadFinanceRecords().filter(r=>r.year===year);
+  const recs = getProfileRecords().filter(r=>r.year===year);
   const cats = loadCategories();
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   // Monthly income/outgoing
-  const invMonthly = loadInvestmentData().filter(r=>r.year===year&&r.metric==='monthly_investment');
+  const invMonthly = loadInvestmentData().filter(r=>(r.profile || 'Abhi') === getActiveProfile()&&r.year===year&&r.metric==='monthly_investment');
   const monthly = MONTHS.map((_,i)=>{
     const m = i+1;
     const inc = recs.filter(r=>r.month===m&&r.type==='income').reduce((s,r)=>s+r.amount,0);

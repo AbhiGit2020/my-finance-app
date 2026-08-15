@@ -26,7 +26,7 @@
     <span id="driveStatus" class="drive-status-text"></span>
     <span id="authStatus" class="auth-badge"></span>
     <div class="nav-btn-row">
-      
+      <select class="global-profile-sel profile-sel-nav"></select>
       <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">🔑 Sign in</button>
       <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">🔄</button>
       <button class="btn btn-sm btn-teal" onclick="saveInvestments()" title="Save to Drive">☁ Save</button>
@@ -189,17 +189,27 @@ function getInvCats(year){
   ).sort((a,b)=>a.order-b.order);
 }
 
-function computeCumulative(mVals){
-  let running=0; const out={};
+function computeCumulative(mVals,startingBalance=0){
+  let running=startingBalance; const out={};
   MONTHS.forEach(m=>{ running+=parseFloat(mVals[m])||0; out[m]=running; });
   return out;
+}
+
+// Sum of all monthly_investment amounts booked in years before `year` — the
+// since-inception capital carried into this year, so Cumulative Investment
+// doesn't reset to 0 every January while Market Value keeps the full balance.
+function getPriorYearsInvested(category,year,profile){
+  return loadInvestmentData()
+    .filter(r=>r.category===category && r.metric==='monthly_investment' && r.year<year && (r.profile||'Abhi')===profile)
+    .reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
 }
 
 // ── Load table data from stored investment data ───────────
 function loadTableData(){
   const year=parseInt(yearSel.value);
   const cats=getInvCats(year);
-  const stored=loadInvestmentData().filter(r=>r.year===year);
+  const profile = getActiveProfile();
+  const stored=loadInvestmentData().filter(r=>r.year===year && (r.profile || 'Abhi') === profile);
   const BANDS=['🔵','🟢','🟡','🟣','🟠'];
   tableData=[];
   cats.forEach((cat,i)=>{
@@ -211,8 +221,9 @@ function loadTableData(){
     MONTHS.forEach(m=>{ const r=stored.find(s=>s.category===cat.category&&s.metric==='monthly_investment'&&s.month===MONTHS.indexOf(m)+1); miRow[m]=r?r.amount:0; });
     tableData.push(miRow);
 
-    // Cumulative (auto)
-    const cum=computeCumulative(miRow);
+    // Cumulative (auto) — since-inception, not reset each year
+    const priorTotal=getPriorYearsInvested(cat.category,year,profile);
+    const cum=computeCumulative(miRow,priorTotal);
     tableData.push({invName:cat.category,metric:'Cumulative Investment',band,status,invType:cat.type,...cum});
 
     // Market Value
@@ -280,7 +291,9 @@ function onInvCellChange(input){
   if(metric==='Monthly Investment'){
     const miRow=tableData.find(r=>r.invName===inv&&r.metric==='Monthly Investment');
     if(miRow){
-      const cum=computeCumulative(miRow);
+      const year=parseInt(yearSel.value);
+      const priorTotal=getPriorYearsInvested(inv,year,getActiveProfile());
+      const cum=computeCumulative(miRow,priorTotal);
       const cumRow=tableData.find(r=>r.invName===inv&&r.metric==='Cumulative Investment');
       if(cumRow){ Object.assign(cumRow,cum); }
       // Update cumulative cells in DOM
@@ -346,7 +359,8 @@ function saveInvestments(){
   const editableNames = [...new Set(tableData
     .filter(row => row.status !== 'Inactive' && METRIC_CODE[row.metric])
     .map(row => row.invName))];
-  let stored=loadInvestmentData().filter(r=>!(r.year===year && editableNames.includes(r.category)));
+  const profile = getActiveProfile();
+  let stored=loadInvestmentData().filter(r=>!((r.profile || 'Abhi')===profile && r.year===year && editableNames.includes(r.category)));
 
   tableData.forEach(row=>{
     if(row.status==='Inactive') return;
@@ -356,7 +370,7 @@ function saveInvestments(){
       if(val===0) return;
       stored.push({
         record_id:uuid(), year, month:i+1,
-        category:row.invName, metric:METRIC_CODE[row.metric],
+        profile, category:row.invName, metric:METRIC_CODE[row.metric],
         type:'investment', amount:val,
         created_at:now, updated_at:now,
       });
@@ -398,18 +412,36 @@ function addInvestment(){
 
 function retireInvestment(){
   const name=document.getElementById('manageInvSel').value;
+  if(!name){toast('Select an investment','error');return;}
   const cats=loadCategories();
-  const cat=cats.find(c=>c.category===name);
+  const cat=cats.find(c=>c.category===name&&c.section==='investments');
   if(!cat){toast('Not found','error');return;}
-  cat.active=false; cat.end_year=parseInt(yearSel.value);
-  saveCategories(cats); render(); toast(`Retired: ${name}`);
+
+  const valStr=prompt(`Retiring "${name}". Enter its value (S$) when stopped — this amount will be withdrawn to a Cash / Savings asset. Leave as 0 if there's nothing to withdraw.`,'0');
+  if(valStr===null) return; // cancelled
+  const value=parseFloat(valStr)||0;
+  if(value<0){toast('Value cannot be negative','error');return;}
+
+  const year=parseInt(yearSel.value);
+  cat.active=false; cat.end_year=year;
+  cat.retired_value=value; cat.retired_date=new Date().toISOString();
+  saveCategories(cats);
+
+  const profile=getActiveProfile();
+  if(value>0){
+    withdrawInvestmentToSavings(profile,name,value);
+    toast(`Retired: ${name} — S$ ${fmt(value)} withdrawn to Cash / Savings`);
+  } else {
+    toast(`Retired: ${name}`);
+  }
+  render();
 }
 
 function deleteInvestment(){
   const name=document.getElementById('manageInvSel').value;
   if(!confirm(`Delete "${name}"?`)) return;
-  let cats=loadCategories().filter(c=>c.category!==name);
-  let inv=loadInvestmentData().filter(r=>r.category!==name);
+  let cats=loadCategories().filter(c=>!(c.category===name&&c.section==='investments'));
+  let inv=loadInvestmentData().filter(r=>!((r.profile || 'Abhi')===getActiveProfile() && r.category===name));
   saveCategories(cats); saveInvestmentData(inv);
   render(); toast(`Deleted: ${name}`,'info');
 }
