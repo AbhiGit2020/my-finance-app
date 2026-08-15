@@ -119,17 +119,27 @@ function showStatus(msg, color) {
 }
 
 // ── Google Auth ───────────────────────────────────────────
+// Pending silent-refresh callers (see refreshAccessTokenSilently) — kept
+// separate from the initial sign-in flow so a mid-session token refresh
+// never re-triggers loadFromDrive() and clobbers unsaved local edits.
+let _refreshResolvers = [];
+
 function initGoogleAuth() {
   return new Promise((resolve) => {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: GOOGLE_SCOPES,
       callback: async (resp) => {
-        if (resp.error) { showStatus('Auth failed'); resolve(false); return; }
+        const pending = _refreshResolvers.splice(0);
+        if (resp.error) {
+          if (pending.length) { pending.forEach(r => r(false)); return; }
+          showStatus('Auth failed'); resolve(false); return;
+        }
         _accessToken = resp.access_token;
         _signedIn    = true;
         saveSession(_accessToken, resp.expires_in || 3600);
         updateAuthUI(true);
+        if (pending.length) { pending.forEach(r => r(true)); return; }
         await loadFromDrive();
         resolve(true);
       },
@@ -180,40 +190,79 @@ function triggerRender() {
 }
 
 // ── Drive helpers ─────────────────────────────────────────
+// Ask Google for a fresh access token without a popup (works silently when
+// the user still has an active Google session). Distinct from the initial
+// sign-in flow via _refreshResolvers, so it never re-runs loadFromDrive().
+function refreshAccessTokenSilently() {
+  return new Promise((resolve) => {
+    if (!window._gisClient) { resolve(false); return; }
+    _refreshResolvers.push(resolve);
+    window._gisClient.requestAccessToken({ prompt: '' });
+  });
+}
+
+// Wraps fetch() so an expired access token (401) is retried once after a
+// silent refresh, instead of failing the whole operation outright. The
+// access token can go stale mid-session (it lasts ~1hr) while the tab stays
+// open, which is the most common cause of "Save" intermittently failing.
+async function driveFetch(url, options = {}) {
+  const withAuth = () => ({ ...options, headers: { ...(options.headers||{}), Authorization: `Bearer ${_accessToken}` } });
+  let res = await fetch(url, withAuth());
+  if (res.status === 401) {
+    const refreshed = await refreshAccessTokenSilently();
+    if (refreshed) res = await fetch(url, withAuth());
+  }
+  return res;
+}
+
 async function driveGet(url) {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${_accessToken}` } });
+  const res = await driveFetch(url);
   if (!res.ok) throw new Error('Drive GET ' + res.status);
   return res.json();
 }
 
+// In-flight promises so two near-simultaneous saves (e.g. an auto-save timer
+// firing right as you click Save) can't both race to create a duplicate
+// folder/file before either has a chance to cache the id.
+let _ensureFolderPromise = null;
 async function ensureFolder() {
   if (_folderId) return _folderId;
-  const q = encodeURIComponent(`name='${DRIVE_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-  const r = await driveGet(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`);
-  if (r.files && r.files.length > 0) {
-    _folderId = r.files[0].id;
-  } else {
-    const res = await fetch('https://www.googleapis.com/drive/v3/files', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${_accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: DRIVE_FOLDER, mimeType: 'application/vnd.google-apps.folder' }),
-    });
-    _folderId = (await res.json()).id;
-  }
-  sessionStorage.setItem(SS_FOLDER, _folderId);
-  return _folderId;
+  if (_ensureFolderPromise) return _ensureFolderPromise;
+  _ensureFolderPromise = (async () => {
+    const q = encodeURIComponent(`name='${DRIVE_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+    const r = await driveGet(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`);
+    if (r.files && r.files.length > 0) {
+      _folderId = r.files[0].id;
+    } else {
+      const res = await driveFetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: DRIVE_FOLDER, mimeType: 'application/vnd.google-apps.folder' }),
+      });
+      if (!res.ok) throw new Error('Drive folder create failed ' + res.status);
+      _folderId = (await res.json()).id;
+    }
+    sessionStorage.setItem(SS_FOLDER, _folderId);
+    return _folderId;
+  })();
+  try { return await _ensureFolderPromise; } finally { _ensureFolderPromise = null; }
 }
 
+let _ensureFilePromise = null;
 async function ensureFile() {
   if (_fileId) return _fileId;
-  const folderId = await ensureFolder();
-  const q = encodeURIComponent(`name='${DATA_FILENAME}' and '${folderId}' in parents and trashed=false`);
-  const r = await driveGet(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`);
-  if (r.files && r.files.length > 0) {
-    _fileId = r.files[0].id;
-    sessionStorage.setItem(SS_FILE, _fileId);
-  }
-  return _fileId || null;
+  if (_ensureFilePromise) return _ensureFilePromise;
+  _ensureFilePromise = (async () => {
+    const folderId = await ensureFolder();
+    const q = encodeURIComponent(`name='${DATA_FILENAME}' and '${folderId}' in parents and trashed=false`);
+    const r = await driveGet(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`);
+    if (r.files && r.files.length > 0) {
+      _fileId = r.files[0].id;
+      sessionStorage.setItem(SS_FILE, _fileId);
+    }
+    return _fileId || null;
+  })();
+  try { return await _ensureFilePromise; } finally { _ensureFilePromise = null; }
 }
 
 // ── Load from Drive ───────────────────────────────────────
@@ -230,9 +279,7 @@ async function loadFromDrive() {
       triggerRender();
       return;
     }
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers: { Authorization: `Bearer ${_accessToken}` }
-    });
+    const res = await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
     if (!res.ok) throw new Error('Download failed ' + res.status);
     const data = await res.json();
     _db = { ...emptyDb(), ...data };
@@ -263,9 +310,9 @@ async function driveSave() {
     const folderId = await ensureFolder();
 
     if (_fileId) {
-      const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${_fileId}?uploadType=media`, {
+      const res = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${_fileId}?uploadType=media`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${_accessToken}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: blob,
       });
       if (!res.ok) throw new Error('Drive PATCH failed ' + res.status);
@@ -273,8 +320,8 @@ async function driveSave() {
       const form = new FormData();
       form.append('metadata', new Blob([JSON.stringify({ name: DATA_FILENAME, parents: [folderId] })], { type: 'application/json' }));
       form.append('file', blob);
-      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-        method: 'POST', headers: { Authorization: `Bearer ${_accessToken}` }, body: form,
+      const res = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST', body: form,
       });
       if (!res.ok) throw new Error('Drive create failed ' + res.status);
       _fileId = (await res.json()).id;
@@ -284,7 +331,12 @@ async function driveSave() {
     return true;
   } catch(e) {
     console.error('driveSave:', e);
-    showStatus('⚠️ Save failed', 'var(--red)');
+    if (String(e.message||'').includes('401')) {
+      showStatus('⚠️ Session expired — please sign in again', 'var(--red)');
+      alert('Your Google sign-in session expired and could not be refreshed automatically. Please click "Sign in" again, then Save.');
+    } else {
+      showStatus('⚠️ Save failed', 'var(--red)');
+    }
     return false;
   }
 }
@@ -301,8 +353,8 @@ async function driveBackup() {
     const form = new FormData();
     form.append('metadata', new Blob([JSON.stringify({ name: `backup_${ts}.json`, parents: [folderId] })], { type: 'application/json' }));
     form.append('file', blob);
-    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-      method: 'POST', headers: { Authorization: `Bearer ${_accessToken}` }, body: form,
+    const res = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST', body: form,
     });
     if (!res.ok) throw new Error('Drive backup failed ' + res.status);
     showStatus(`✅ Backup saved: backup_${ts}.json`, 'var(--green)');
