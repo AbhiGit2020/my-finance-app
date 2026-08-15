@@ -363,11 +363,21 @@ function loadInvestmentTableData() {
   });
 }
 
+// Monthly Investment is a flow (contributions), so summing the 12 months is a
+// real YTD total. Cumulative Investment and Market Value are running
+// balances/snapshots — summing them across months double/triple-counts, so
+// the representative figure is just the latest (December) balance instead.
+function invRowSummaryValue(row) {
+  return row.metric === 'Monthly Investment'
+    ? MONTHS.reduce((s,m)=>s+(parseFloat(row[m])||0),0)
+    : (parseFloat(row['Dec'])||0);
+}
+
 function renderInvestmentPivot() {
   const table = document.getElementById('pivotTable');
   let html = '<thead><tr><th></th><th style="text-align:left">Investment</th><th style="text-align:left">Type</th><th style="text-align:left">Metric</th>';
   MONTHS.forEach(m=>html+=`<th>${m}</th>`);
-  html += '<th>YTD</th></tr></thead><tbody>';
+  html += '<th>YTD / Latest</th></tr></thead><tbody>';
 
   let lastInv = '';
   invTableData.forEach(row => {
@@ -395,8 +405,7 @@ function renderInvestmentPivot() {
       }
     });
 
-    const ytd = MONTHS.reduce((s,m2)=>s+(parseFloat(row[m2])||0),0);
-    html += `<td class="bold mono">${fmt(ytd)}</td></tr>`;
+    html += `<td class="bold mono">${fmt(invRowSummaryValue(row))}</td></tr>`;
   });
   html += '</tbody>';
   table.innerHTML = html;
@@ -405,11 +414,18 @@ function renderInvestmentPivot() {
   renderFxSelectors();
 }
 
+// Patches only the cells that changed instead of calling renderInvestmentPivot()
+// (rebuilding the whole table on every keystroke's onchange would destroy the
+// input the browser is mid-way through focusing on Tab, throwing focus back
+// to the top of the page instead of the next field).
 function onInvCellChange(input) {
   const inv = input.dataset.inv, metric = input.dataset.metric, month = input.dataset.month;
   const val = parseFloat(input.value)||0;
   const row = invTableData.find(r=>r.invName===inv&&r.metric===metric);
   if (row) row[month] = val;
+
+  const rowYtdCell = input.closest('tr')?.querySelector('td.bold.mono');
+  if (row && rowYtdCell) rowYtdCell.textContent = fmt(invRowSummaryValue(row));
 
   if (metric === 'Monthly Investment') {
     const miRow = invTableData.find(r=>r.invName===inv&&r.metric==='Monthly Investment');
@@ -419,9 +435,17 @@ function onInvCellChange(input) {
       const cum = computeInvCumulative(miRow, priorTotal);
       const cumRow = invTableData.find(r=>r.invName===inv&&r.metric==='Cumulative Investment');
       if (cumRow) Object.assign(cumRow, cum);
+
+      const cumTr = [...document.querySelectorAll('tr[data-metric="Cumulative Investment"]')].find(tr=>tr.dataset.inv===inv);
+      if (cumTr) {
+        const monthCells = [...cumTr.querySelectorAll('td.mono')];
+        MONTHS.forEach((m,i) => { if (monthCells[i]) monthCells[i].textContent = fmt(cum[m]); });
+        const cumYtdCell = cumTr.querySelector('td.bold.mono');
+        if (cumYtdCell) cumYtdCell.textContent = fmt(parseFloat(cum['Dec'])||0);
+      }
     }
   }
-  renderInvestmentPivot();
+  renderInvestmentSummary();
 }
 
 function renderInvestmentSummary() {
@@ -865,7 +889,7 @@ function exportSectionExcel() {
     const data = invTableData.map(row => {
       const out = { Investment:row.invName, Type:row.invType, Metric:row.metric, Status:row.status };
       MONTHS.forEach(m=>out[m]=row[m]||0);
-      out['YTD'] = MONTHS.reduce((s,m)=>s+(row[m]||0),0);
+      out['YTD / Latest'] = invRowSummaryValue(row);
       return out;
     });
     exportToExcel([{ name: `Investments_${year}`, data }]);
