@@ -89,6 +89,7 @@ body {
   padding: 3px 8px; font-size: 0.78rem; font-weight: 700; cursor: pointer;
 }
 .nav-actions { display: flex; gap: 8px; margin-left: auto; }
+.dashboard-split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
 
 /* ── Layout ───────────────────────────────────────────────── */
 .page { max-width: 1300px; margin: 0 auto; padding: 28px 24px 60px; width: 100%; }
@@ -267,13 +268,18 @@ details[open] summary { color: var(--teal); border-bottom: 1px solid var(--borde
 
 /* ── Mobile ───────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .nav { padding: 0 12px; }
-  .nav-brand { font-size: 0.9rem; margin-right: 12px; }
+  .nav { height: auto; padding: 8px 12px; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+  .nav-brand { width: 100%; font-size: 0.9rem; margin-right: 0; }
+  .nav-right { width: 100%; margin-left: 0; align-items: stretch; overflow: hidden; }
+  .nav-btn-row { overflow-x: auto; padding-bottom: 3px; scrollbar-width: thin; }
+  .nav-links { order: 3; flex: 0 0 100%; overflow-x: auto; padding-bottom: 3px; scrollbar-width: thin; }
   .nav-links a { padding: 5px 10px; font-size: 0.8rem; }
+  .drive-status-text, .auth-badge { display: none; }
   .page { padding: 16px 12px 60px; }
   .kpi-grid { grid-template-columns: repeat(2,1fr); }
-  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .grid-2, .grid-3, .dashboard-split { grid-template-columns: 1fr; }
   .form-row { flex-direction: column; }
+  .form-group, .form-group input, .form-group select, .input-sm, .input-md, .input-lg { width: 100%; }
   .page-title { font-size: 1.2rem; }
   table { font-size: 0.78rem; }
   thead th, tbody td { padding: 7px 8px; }

@@ -5,6 +5,7 @@
 <title>My Finance App — Assets</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/finance-core.js"></script>
 <script src="js/store.js"></script>
 <style>
 .asset-card { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:18px 20px; margin-bottom:18px; }
@@ -29,6 +30,7 @@
     <a href="stocks.html" class="">Portfolio</a>
     <a href="stock_tracker.html" class="">Watchlists</a>
     <a href="stock_compare.html" class="">Compare</a>
+    <a href="planning.html" class="">Plan</a>
     <a href="assets.html" class="active">Assets</a>
   </div>
   <div class="nav-right">
@@ -89,7 +91,7 @@
         <div class="form-group">
           <label>Owner</label>
           <select id="newAssetOwner" class="input-md">
-            <option>Abhi</option><option>Wife</option><option>Kid</option><option>Joint</option><option>Other</option>
+            <option>Abhi</option><option>Wife</option><option>Kids</option><option>Joint</option><option>Other</option>
           </select>
         </div>
         <div class="form-group" style="flex:2">
@@ -179,21 +181,23 @@ function createAsset(){
   render(); toast(`Asset created: ${name}`);
 }
 
-function retireAsset(){
+async function retireAsset(){
   const name=document.getElementById('manageAssetSel').value;
   const arr=loadAssetsMaster();
   const a=arr.find(x=>x.asset_name===name);
   if(!a){toast('Not found','error');return;}
+  if (!(await backupBeforeDestructiveAction('retire the asset'))) return;
   a.active=false; a.updated_at=new Date().toISOString();
   saveAssetsMaster(arr); render(); toast(`Retired: ${name}`);
 }
 
-function deleteAsset(){
+async function deleteAsset(){
   const name=document.getElementById('manageAssetSel').value;
-  if(!confirm(`Delete "${name}" and all its valuations?`)) return;
+  if(!confirm(`Delete "${name}" and all its valuations? A Drive safety backup will be created first.`)) return;
   const arr=loadAssetsMaster();
   const a=arr.find(x=>x.asset_name===name);
   if(!a){toast('Not found','error');return;}
+  if (!(await backupBeforeDestructiveAction('delete the asset and its valuations'))) return;
   saveAssetsMaster(arr.filter(x=>x.asset_name!==name));
   saveAssetValues(loadAssetValues().filter(v=>v.asset_id!==a.asset_id));
   render(); toast(`Deleted: ${name}`,'info');
@@ -217,7 +221,9 @@ function addValuation(assetId,assetName){
   render(); toast(`Valuation added for ${assetName}`);
 }
 
-function deleteValuation(valId){
+async function deleteValuation(valId){
+  if (!confirm('Delete this valuation entry?')) return;
+  if (!(await backupBeforeDestructiveAction('delete the valuation'))) return;
   saveAssetValues(loadAssetValues().filter(v=>v.valuation_id!==valId));
   render(); toast('Entry deleted');
 }
@@ -369,11 +375,7 @@ function exportAssetsExcel(){
 
 // ── Refresh from Drive ────────────────────────────────────
 async function refreshFromDrive() {
-  const overlay = document.getElementById('loadingOverlay');
-  const msg = document.getElementById('loadingMsg');
-  if (overlay) { overlay.style.display='flex'; overlay.style.opacity='1'; }
-  if (msg) msg.textContent = 'Refreshing from Google Drive…';
-  await loadFromDrive();
+  return reloadFromDriveSafely();
 }
 
 window.onDataLoaded = render;

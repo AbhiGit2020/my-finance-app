@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Finance App - Planning</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="js/finance-core.js"></script>
+<script src="js/store.js"></script>
+<style>
+.planning-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:20px; }
+.planning-kpi { background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; }
+.planning-kpi span { display:block; color:var(--text-muted); font-size:0.76rem; text-transform:uppercase; margin-bottom:5px; }
+.planning-kpi strong { font-family:'IBM Plex Mono',monospace; font-size:1.25rem; }
+.planning-section { padding:18px 0 26px; border-bottom:1px solid var(--border); }
+.planning-section:last-child { border-bottom:0; }
+.planning-heading { font-size:1.05rem; margin-bottom:14px; }
+.chart-wrap { position:relative; height:280px; }
+@media (max-width:768px) { .chart-wrap { height:230px; } }
+</style>
+</head>
+<body>
+<div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading your data from Google Drive...</div></div>
+
+<nav class="nav">
+  <a class="nav-brand" href="index.html">MyFinance</a>
+  <div class="nav-links">
+    <a href="index.html">Dashboard</a><a href="input.html">Finance Input</a>
+    <a href="input.html?section=investments">Investments</a><a href="stocks.html">Portfolio</a>
+    <a href="stock_tracker.html">Watchlists</a><a href="stock_compare.html">Compare</a>
+    <a href="planning.html" class="active">Plan</a><a href="assets.html">Assets</a>
+  </div>
+  <div class="nav-right">
+    <span id="driveStatus" class="drive-status-text"></span><span id="authStatus" class="auth-badge"></span>
+    <div class="nav-btn-row">
+      <select class="global-profile-sel profile-sel-nav"></select>
+      <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">Sign in</button>
+      <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">Refresh</button>
+      <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">Save</button>
+      <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">Backup</button>
+      <button class="btn btn-sm btn-ghost" onclick="exportJsonBackup()">Export JSON</button>
+    </div>
+  </div>
+</nav>
+
+<main class="page">
+  <div class="section-header">
+    <h1 class="page-title" style="margin-bottom:0">Planning</h1>
+    <select id="planningScope" onchange="renderAll()"><option value="profile">Active profile</option><option value="household">Household</option></select>
+  </div>
+
+  <div class="tabs" style="margin-top:20px">
+    <button class="tab-btn active" data-tab="budgets" onclick="showTab('budgets')">Budgets</button>
+    <button class="tab-btn" data-tab="recurring" onclick="showTab('recurring')">Recurring</button>
+    <button class="tab-btn" data-tab="networth" onclick="showTab('networth')">Net Worth</button>
+    <button class="tab-btn" data-tab="retirement" onclick="showTab('retirement')">Retirement</button>
+    <button class="tab-btn" data-tab="import" onclick="showTab('import')">CSV Import</button>
+  </div>
+
+  <section id="tab-budgets" class="tab-pane active planning-section">
+    <h2 class="planning-heading">Category Budgets</h2>
+    <div class="form-row">
+      <div class="form-group"><label>Year</label><select id="budgetYear" class="input-sm"></select></div>
+      <div class="form-group" style="flex:2"><label>Category</label><select id="budgetCategory" class="input-lg"></select></div>
+      <div class="form-group"><label>Monthly target (S$)</label><input id="budgetAmount" type="number" min="0" step="10" class="input-md"></div>
+      <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary" onclick="saveBudget()">Save Budget</button></div>
+    </div>
+    <div class="tbl-wrap"><table id="budgetTable"></table></div>
+  </section>
+
+  <section id="tab-recurring" class="tab-pane planning-section">
+    <div class="section-header"><h2 class="planning-heading">Recurring Transactions</h2><button class="btn btn-secondary" onclick="generateRecurring()">Generate Due Entries</button></div>
+    <div class="form-row">
+      <div class="form-group"><label>Name</label><input id="recurringName" class="input-md"></div>
+      <div class="form-group"><label>Type</label><select id="recurringType"><option value="expense">Expense</option><option value="income">Income</option><option value="tax">Tax</option></select></div>
+      <div class="form-group" style="flex:2"><label>Category</label><select id="recurringCategory" class="input-lg"></select></div>
+      <div class="form-group"><label>Amount (S$)</label><input id="recurringAmount" type="number" min="0" step="10" class="input-md"></div>
+      <div class="form-group"><label>Frequency</label><select id="recurringFrequency"><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></div>
+      <div class="form-group"><label>Start date</label><input id="recurringStart" type="date" class="input-md"></div>
+      <div class="form-group"><label>End date</label><input id="recurringEnd" type="date" class="input-md"></div>
+      <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary" onclick="addRecurring()">Add</button></div>
+    </div>
+    <div class="tbl-wrap"><table id="recurringTable"></table></div>
+  </section>
+
+  <section id="tab-networth" class="tab-pane planning-section">
+    <h2 class="planning-heading">Net Worth History</h2>
+    <div class="planning-grid" id="netWorthKpis"></div>
+    <div class="chart-wrap"><canvas id="netWorthChart"></canvas></div>
+  </section>
+
+  <section id="tab-retirement" class="tab-pane planning-section">
+    <h2 class="planning-heading">Retirement Projection</h2>
+    <div class="form-row">
+      <div class="form-group"><label>Current age</label><input id="currentAge" type="number" min="18" max="90" class="input-sm"></div>
+      <div class="form-group"><label>Retirement age</label><input id="retirementAge" type="number" min="30" max="100" class="input-sm"></div>
+      <div class="form-group"><label>Annual spending (S$)</label><input id="annualSpending" type="number" min="0" step="1000" class="input-md"></div>
+      <div class="form-group"><label>Monthly contribution (S$)</label><input id="monthlyContribution" type="number" min="0" step="100" class="input-md"></div>
+      <div class="form-group"><label>Expected return (%)</label><input id="expectedReturn" type="number" min="0" max="30" step="0.1" class="input-sm"></div>
+      <div class="form-group"><label>Withdrawal rate (%)</label><input id="withdrawalRate" type="number" min="1" max="10" step="0.1" class="input-sm"></div>
+      <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary" onclick="saveProjectionSettings()">Save Assumptions</button></div>
+    </div>
+    <div class="planning-grid" id="retirementKpis"></div>
+  </section>
+
+  <section id="tab-import" class="tab-pane planning-section">
+    <h2 class="planning-heading">Bank CSV Import</h2>
+    <div class="form-row">
+      <div class="form-group"><label>CSV file</label><input id="csvFile" type="file" accept=".csv,text/csv" onchange="previewCsv()"></div>
+      <div class="form-group" style="justify-content:flex-end"><button id="csvImportBtn" class="btn btn-primary" onclick="importCsv()" disabled>Import Rows</button></div>
+    </div>
+    <div class="tbl-wrap"><table id="csvPreviewTable"></table></div>
+  </section>
+</main>
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+let netWorthChart = null;
+let csvRows = [];
+const today = new Date().toISOString().slice(0,10);
+
+function toast(message,type='success'){const c=document.getElementById('toastContainer');const d=document.createElement('div');d.className=`toast ${type}`;d.textContent=message;c.appendChild(d);setTimeout(()=>d.remove(),3500);}
+function fmt(value){return Number(value||0).toLocaleString('en-SG',{maximumFractionDigits:0});}
+function profile(){return getActiveProfile();}
+function scopeProfiles(){return document.getElementById('planningScope').value==='household'?PROFILES:[profile()];}
+function showTab(name){document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id===`tab-${name}`));if(name==='networth')renderNetWorth();}
+
+function initControls(){
+  const years=document.getElementById('budgetYear'); const current=new Date().getFullYear();
+  years.innerHTML=''; for(let y=current-2;y<=current+3;y++) years.insertAdjacentHTML('beforeend',`<option ${y===current?'selected':''}>${y}</option>`);
+  document.getElementById('recurringStart').value=today;
+  document.getElementById('recurringType').onchange=renderRecurringCategoryOptions;
+}
+
+function expenseCategories(){return loadCategories().filter(c=>c.active!==false&&c.section==='outgoing').sort((a,b)=>(a.order||0)-(b.order||0));}
+function categoriesForType(type){const section=type==='income'?'incoming':'outgoing';return loadCategories().filter(c=>c.active!==false&&c.section===section).sort((a,b)=>(a.order||0)-(b.order||0));}
+function renderCategoryOptions(){document.getElementById('budgetCategory').innerHTML=expenseCategories().map(c=>`<option>${escapeHtml(c.category)}</option>`).join('');renderRecurringCategoryOptions();}
+function renderRecurringCategoryOptions(){const type=document.getElementById('recurringType').value;document.getElementById('recurringCategory').innerHTML=categoriesForType(type).map(c=>`<option>${escapeHtml(c.category)}</option>`).join('');}
+
+function saveBudget(){
+  const year=Number(document.getElementById('budgetYear').value),category=document.getElementById('budgetCategory').value,monthly=Number(document.getElementById('budgetAmount').value);
+  if(!category||!(monthly>0)){toast('Enter a category and monthly target','error');return;}
+  const rows=loadBudgetTargets().filter(r=>!((r.profile||'Abhi')===profile()&&Number(r.year)===year&&r.category===category));
+  rows.push({budget_id:uuid(),profile:profile(),year,category,monthly_target:monthly,updated_at:new Date().toISOString()});
+  saveBudgetTargets(rows);document.getElementById('budgetAmount').value='';renderBudgets();toast('Budget saved');
+}
+async function deleteBudget(id){if(!confirm('Delete this budget target?'))return;if(!(await backupBeforeDestructiveAction('delete the budget target')))return;saveBudgetTargets(loadBudgetTargets().filter(r=>r.budget_id!==id));renderBudgets();}
+function renderBudgets(){
+  const year=Number(document.getElementById('budgetYear').value);const profiles=scopeProfiles();
+  const rows=loadBudgetTargets().filter(r=>profiles.includes(r.profile||'Abhi')&&Number(r.year)===year);
+  const actual=loadFinanceRecords().filter(r=>profiles.includes(r.profile||'Abhi')&&Number(r.year)===year&&(r.type==='expense'||r.type==='tax'));
+  const body=rows.map(r=>{const spent=actual.filter(x=>x.category===r.category).reduce((s,x)=>s+FinanceCore.number(x.amount),0);const target=FinanceCore.number(r.monthly_target)*12;const variance=target-spent;return `<tr><td style="text-align:left">${escapeHtml(r.category)}</td><td>${fmt(r.monthly_target)}</td><td>${fmt(target)}</td><td>${fmt(spent)}</td><td class="${variance>=0?'pos':'neg'}">${fmt(variance)}</td><td>${document.getElementById('planningScope').value==='profile'?`<button class="btn btn-danger btn-sm" onclick="deleteBudget(${jsArg(r.budget_id)})">Delete</button>`:''}</td></tr>`;}).join('');
+  document.getElementById('budgetTable').innerHTML=`<thead><tr><th style="text-align:left">Category</th><th>Monthly</th><th>Annual</th><th>Actual</th><th>Remaining</th><th></th></tr></thead><tbody>${body||'<tr><td colspan="6" class="text-muted" style="text-align:center">No budgets for this year</td></tr>'}</tbody>`;
+}
+
+function addRecurring(){
+  const name=document.getElementById('recurringName').value.trim(),type=document.getElementById('recurringType').value,category=document.getElementById('recurringCategory').value,amount=Number(document.getElementById('recurringAmount').value),start_date=document.getElementById('recurringStart').value,end_date=document.getElementById('recurringEnd').value,frequency=document.getElementById('recurringFrequency').value;
+  if(!name||!category||!(amount>0)||!start_date){toast('Complete the recurring transaction fields','error');return;}
+  const rows=loadRecurringTransactions();rows.push({recurring_id:uuid(),profile:profile(),name,type,category,amount,frequency,start_date,end_date:end_date||null,active:true,created_at:new Date().toISOString()});saveRecurringTransactions(rows);renderRecurring();toast('Recurring transaction added');
+}
+async function retireRecurring(id){if(!(await backupBeforeDestructiveAction('retire the recurring transaction')))return;const rows=loadRecurringTransactions();const row=rows.find(r=>r.recurring_id===id);if(row)row.active=false;saveRecurringTransactions(rows);renderRecurring();}
+function generateRecurring(){
+  const schedules=loadRecurringTransactions().filter(r=>(r.profile||'Abhi')===profile()&&r.active!==false);let records=loadFinanceRecords(),added=0;const keys=new Set(records.filter(r=>r.recurring_id).map(r=>`${r.recurring_id}|${r.date}`));
+  schedules.forEach(row=>FinanceCore.occurrenceDates(row,today).forEach(date=>{const key=`${row.recurring_id}|${date}`;if(keys.has(key))return;const d=new Date(`${date}T00:00:00Z`);records.push({record_id:uuid(),profile:profile(),date,year:d.getUTCFullYear(),month:d.getUTCMonth()+1,type:row.type,category:row.category,amount:FinanceCore.number(row.amount),notes:`Recurring: ${row.name}`,recurring_id:row.recurring_id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});keys.add(key);added++;}));
+  if(added){saveFinanceRecords(records);toast(`${added} due entr${added===1?'y':'ies'} generated`);}else toast('No new due entries','info');
+}
+function renderRecurring(){const rows=loadRecurringTransactions().filter(r=>(r.profile||'Abhi')===profile());document.getElementById('recurringTable').innerHTML=`<thead><tr><th style="text-align:left">Name</th><th>Type</th><th style="text-align:left">Category</th><th>Amount</th><th>Frequency</th><th>Starts</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(r=>`<tr><td style="text-align:left">${escapeHtml(r.name)}</td><td>${escapeHtml(r.type)}</td><td style="text-align:left">${escapeHtml(r.category)}</td><td>${fmt(r.amount)}</td><td>${escapeHtml(r.frequency)}</td><td>${escapeHtml(r.start_date)}</td><td>${r.active!==false?'Active':'Retired'}</td><td>${r.active!==false?`<button class="btn btn-secondary btn-sm" onclick="retireRecurring(${jsArg(r.recurring_id)})">Retire</button>`:''}</td></tr>`).join('')||'<tr><td colspan="8" class="text-muted" style="text-align:center">No recurring transactions</td></tr>'}</tbody>`;}
+
+function monthPoints(count=24){const out=[];const now=new Date();for(let i=count-1;i>=0;i--){const d=new Date(Date.UTC(now.getFullYear(),now.getMonth()-i+1,0));out.push({key:d.toISOString().slice(0,7),end:d.toISOString().slice(0,10),label:d.toLocaleDateString('en-SG',{month:'short',year:'2-digit',timeZone:'UTC'})});}return out;}
+function netWorthAt(date,profiles){
+  const assetIds=new Set(loadAssetsMaster().filter(a=>a.active!==false&&(profiles.includes(a.owner||'Abhi')||(profiles.length>1&&a.owner==='Other'))).map(a=>a.asset_id));let assets=0;
+  assetIds.forEach(id=>{const row=FinanceCore.latestDatedRow(loadAssetValues().filter(v=>v.asset_id===id&&String(v.date||'')<=date),'date');assets+=FinanceCore.number(row?.value_sgd);});
+  const latestInvestments={};loadInvestmentData().filter(r=>profiles.includes(r.profile||'Abhi')&&r.metric==='market_value'&&`${r.year}-${String(r.month).padStart(2,'0')}`<=date.slice(0,7)).sort((a,b)=>`${a.year}-${String(a.month).padStart(2,'0')}`.localeCompare(`${b.year}-${String(b.month).padStart(2,'0')}`)).forEach(r=>latestInvestments[`${r.profile||'Abhi'}|${r.category}`]=FinanceCore.number(r.amount));
+  const investments=Object.values(latestInvestments).reduce((s,v)=>s+v,0);let stocks=0;
+  profiles.forEach(p=>{const tx=loadStockTransactions().filter(r=>r.profile===p&&String(r.date||'')<=date);const holdings=FinanceCore.computeHoldings(tx,(currency,txDate)=>appFxToSgd(currency,txDate)).holdings;holdings.forEach(h=>{const price=stockPriceAsOf(p,h.ticker,date);stocks+=h.qty*FinanceCore.number(price?.close)*appFxToSgd(h.currency,price?.asof_date||date);});});
+  return {assets,investments,stocks,total:assets+investments+stocks};
+}
+function renderNetWorth(){
+  const points=monthPoints(),profiles=scopeProfiles(),values=points.map(p=>netWorthAt(p.end,profiles));const latest=values[values.length-1]||{total:0},prior=values[Math.max(0,values.length-13)]||{total:0},change=latest.total-prior.total;
+  document.getElementById('netWorthKpis').innerHTML=`<div class="planning-kpi"><span>Current net worth</span><strong>S$ ${fmt(latest.total)}</strong></div><div class="planning-kpi"><span>12-month change</span><strong class="${change>=0?'text-green':'text-red'}">S$ ${fmt(change)}</strong></div><div class="planning-kpi"><span>Assets</span><strong>S$ ${fmt(latest.assets)}</strong></div><div class="planning-kpi"><span>Investments + stocks</span><strong>S$ ${fmt(latest.investments+latest.stocks)}</strong></div>`;
+  if(netWorthChart)netWorthChart.destroy();netWorthChart=new Chart(document.getElementById('netWorthChart'),{type:'line',data:{labels:points.map(p=>p.label),datasets:[{label:'Net Worth',data:values.map(v=>v.total),borderColor:'#068a91',backgroundColor:'rgba(6,138,145,0.12)',fill:true,tension:0.25,pointRadius:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b949e'}},tooltip:{callbacks:{label:c=>` S$ ${fmt(c.raw)}`}}},scales:{x:{ticks:{color:'#8b949e'},grid:{color:'rgba(255,255,255,0.05)'}},y:{ticks:{color:'#8b949e',callback:v=>'S$'+fmt(v)},grid:{color:'rgba(255,255,255,0.05)'}}}}});
+}
+
+function latestInvestableValue(){const profiles=scopeProfiles(),liquidTypes=new Set(['Cash / Savings','Retirement Fund','Provident Fund','Gold']);const assetIds=new Set(loadAssetsMaster().filter(a=>a.active!==false&&profiles.includes(a.owner||'Abhi')&&liquidTypes.has(a.asset_type)).map(a=>a.asset_id));let liquidAssets=0;assetIds.forEach(id=>{const row=FinanceCore.latestDatedRow(loadAssetValues().filter(v=>v.asset_id===id&&String(v.date||'')<=today),'date');liquidAssets+=FinanceCore.number(row?.value_sgd);});const totals=netWorthAt(today,profiles);return liquidAssets+totals.investments+totals.stocks;}
+function loadProjectionSettings(){const saved=loadPlanningSettings().find(r=>(r.profile||'Abhi')===profile())||{};document.getElementById('currentAge').value=saved.current_age||40;document.getElementById('retirementAge').value=saved.retirement_age||60;document.getElementById('annualSpending').value=saved.annual_spending||60000;document.getElementById('monthlyContribution').value=saved.monthly_contribution||2000;document.getElementById('expectedReturn').value=saved.expected_return??5;document.getElementById('withdrawalRate').value=saved.withdrawal_rate??4;renderProjection();}
+function projectionInputs(){return {current_age:Number(document.getElementById('currentAge').value),retirement_age:Number(document.getElementById('retirementAge').value),annual_spending:Number(document.getElementById('annualSpending').value),monthly_contribution:Number(document.getElementById('monthlyContribution').value),expected_return:Number(document.getElementById('expectedReturn').value),withdrawal_rate:Number(document.getElementById('withdrawalRate').value)};}
+function saveProjectionSettings(){const values=projectionInputs();if(values.retirement_age<=values.current_age||!(values.withdrawal_rate>0)){toast('Check the retirement assumptions','error');return;}const rows=loadPlanningSettings().filter(r=>(r.profile||'Abhi')!==profile());rows.push({setting_id:uuid(),profile:profile(),...values,updated_at:new Date().toISOString()});savePlanningSettings(rows);renderProjection();toast('Assumptions saved');}
+function renderProjection(){const v=projectionInputs(),current=latestInvestableValue(),result=FinanceCore.projectRetirement({currentValue:current,currentAge:v.current_age,retirementAge:v.retirement_age,annualSpending:v.annual_spending,monthlyContribution:v.monthly_contribution,expectedReturn:v.expected_return,withdrawalRate:v.withdrawal_rate});document.getElementById('retirementKpis').innerHTML=`<div class="planning-kpi"><span>Investable now</span><strong>S$ ${fmt(current)}</strong></div><div class="planning-kpi"><span>Target portfolio</span><strong>S$ ${fmt(result.target)}</strong></div><div class="planning-kpi"><span>Projected at ${fmt(v.retirement_age)}</span><strong>S$ ${fmt(result.projected)}</strong></div><div class="planning-kpi"><span>${result.gap>=0?'Projected surplus':'Projected gap'}</span><strong class="${result.gap>=0?'text-green':'text-red'}">S$ ${fmt(Math.abs(result.gap))}</strong></div>`;}
+
+function normalizedCsvRow(row,index){const entries=Object.fromEntries(Object.entries(row).map(([k,v])=>[String(k).trim().toLowerCase().replace(/[^a-z0-9]+/g,'_'),v]));const rawDate=entries.date||entries.transaction_date||entries.posted_date;const parsedDate=rawDate?new Date(rawDate):null;const date=parsedDate&&!Number.isNaN(parsedDate.valueOf())?parsedDate.toISOString().slice(0,10):'';const rawAmount=FinanceCore.number(entries.amount||entries.value||entries.debit||entries.credit);const explicitType=String(entries.type||'').toLowerCase();const type=['income','expense','tax'].includes(explicitType)?explicitType:(rawAmount<0?'expense':'income');const amount=Math.abs(rawAmount);const category=String(entries.category||entries.classification||(type==='income'?'Others':'Small / Daily Expenses')).trim();const notes=String(entries.notes||entries.description||entries.memo||'').trim();return {index:index+1,date,type,category,amount,notes,valid:Boolean(date&&amount>0)};}
+async function previewCsv(){const file=document.getElementById('csvFile').files[0];if(!file)return;try{const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});const raw=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});csvRows=raw.map(normalizedCsvRow);document.getElementById('csvImportBtn').disabled=!csvRows.some(r=>r.valid);document.getElementById('csvPreviewTable').innerHTML=`<thead><tr><th>#</th><th>Date</th><th>Type</th><th style="text-align:left">Category</th><th>Amount</th><th style="text-align:left">Notes</th><th>Status</th></tr></thead><tbody>${csvRows.slice(0,50).map(r=>`<tr><td>${r.index}</td><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.type)}</td><td style="text-align:left">${escapeHtml(r.category)}</td><td>${fmt(r.amount)}</td><td style="text-align:left">${escapeHtml(r.notes)}</td><td class="${r.valid?'pos':'neg'}">${r.valid?'Ready':'Invalid'}</td></tr>`).join('')}</tbody>`;}catch(e){csvRows=[];toast('Could not read the CSV file','error');}}
+async function importCsv(){const valid=csvRows.filter(r=>r.valid);if(!valid.length)return;if(!confirm(`Import ${valid.length} valid row(s) into ${profile()}?`))return;if(!(await backupBeforeDestructiveAction('import the CSV rows')))return;const records=loadFinanceRecords();const existing=new Set(records.map(r=>r.source_id).filter(Boolean));let added=0;valid.forEach(r=>{const sourceId=`csv|${profile()}|${r.date}|${r.type}|${r.category}|${r.amount}|${r.notes}`;if(existing.has(sourceId))return;const d=new Date(`${r.date}T00:00:00Z`);records.push({record_id:uuid(),profile:profile(),date:r.date,year:d.getUTCFullYear(),month:d.getUTCMonth()+1,type:r.type,category:r.category,amount:r.amount,notes:r.notes,source_id:sourceId,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});existing.add(sourceId);added++;});if(added)saveFinanceRecords(records);toast(`${added} row(s) imported${added<valid.length?' (duplicates skipped)':''}`);}
+
+function renderAll(){renderCategoryOptions();renderBudgets();renderRecurring();renderNetWorth();loadProjectionSettings();}
+async function refreshFromDrive(){return reloadFromDriveSafely();}
+window.onProfileChange=renderAll;
+window.onDataLoaded=function(){initControls();document.getElementById('budgetYear').onchange=renderBudgets;renderAll();};
+</script>
+</body>
+</html>

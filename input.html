@@ -5,6 +5,7 @@
 <title>My Finance App — Finance Input</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/finance-core.js"></script>
 <script src="js/store.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -20,6 +21,7 @@
     <a href="stocks.html" class="">Portfolio</a>
     <a href="stock_tracker.html" class="">Watchlists</a>
     <a href="stock_compare.html" class="">Compare</a>
+    <a href="planning.html" class="">Plan</a>
     <a href="assets.html" class="">Assets</a>
   </div>
   <div class="nav-right">
@@ -166,6 +168,16 @@
         </div>
       </div>
       <p id="fxResult" class="text-muted" style="font-size:0.83rem;margin-top:4px"></p>
+      <hr class="divider">
+      <div class="form-row">
+        <div class="form-group"><label>Rate date</label><input type="date" id="fxRateDate" class="input-md"></div>
+        <div class="form-group"><label>Currency</label>
+          <select id="fxRateCurrency" class="input-sm"><option>USD</option><option>EUR</option><option>INR</option><option>GBP</option><option>HKD</option><option>AUD</option></select>
+        </div>
+        <div class="form-group"><label>SGD per unit</label><input type="number" id="fxRateValue" class="input-md" min="0" step="0.0001"></div>
+        <div class="form-group" style="justify-content:flex-end"><button class="btn btn-secondary" onclick="saveFxRate()">Save Rate</button></div>
+      </div>
+      <div class="tbl-wrap"><table id="fxRatesTable"></table></div>
     </div>
   </details>
 
@@ -240,12 +252,6 @@ let currentSection = 'incoming';
 let pivotData = []; // [{Category, Jan..Dec}] — incoming/outgoing
 let invTableData = []; // flat rows: {invName, metric, Jan..Dec, status, invType} — investments
 
-// FX rates for the Investments FX helper
-const FX = {
-  'USD-SGD':1.35, 'SGD-USD':0.741, 'USD-INR':84.0, 'INR-USD':0.0119,
-  'SGD-INR':62.2, 'INR-SGD':0.0161,
-};
-
 // ── Init ──────────────────────────────────────────────────
 const yearSel = document.getElementById('selYear');
 for(let y=currentYear-5;y<=currentYear+10;y++){
@@ -266,6 +272,7 @@ MONTHS.forEach(m => {
 // Set default date for useless expense
 document.getElementById('ueDate').value = new Date().toISOString().slice(0,10);
 document.getElementById('newCatYear').value = currentYear;
+document.getElementById('fxRateDate').value = new Date().toISOString().slice(0,10);
 
 // ── Helpers ───────────────────────────────────────────────
 function toast(msg, type='success') {
@@ -487,6 +494,36 @@ function renderFxSelectors() {
   const cats = getActiveCats();
   const sel = document.getElementById('fxInv');
   if (sel) sel.innerHTML = cats.map(c=>`<option>${escapeHtml(c.category)}</option>`).join('');
+  renderFxRates();
+}
+
+function renderFxRates() {
+  const table = document.getElementById('fxRatesTable');
+  if (!table) return;
+  const rows = [...loadFxRates()].sort((a,b) => String(b.asof_date).localeCompare(String(a.asof_date))).slice(0,20);
+  table.innerHTML = `<thead><tr><th style="text-align:left">Date</th><th style="text-align:left">Currency</th><th>SGD per unit</th><th></th></tr></thead><tbody>${rows.length ? rows.map(row => `
+    <tr><td style="text-align:left">${escapeHtml(row.asof_date)}</td><td style="text-align:left">${escapeHtml(row.currency)}</td><td>${escapeHtml(row.rate_to_sgd)}</td><td><button class="btn btn-danger btn-sm" onclick="deleteFxRate(${jsArg(row.rate_id)})">Delete</button></td></tr>`).join('') : '<tr><td colspan="4" class="text-muted" style="text-align:center">Using default rates</td></tr>'}</tbody>`;
+}
+
+function saveFxRate() {
+  const asofDate = document.getElementById('fxRateDate').value;
+  const currency = document.getElementById('fxRateCurrency').value;
+  const rate = parseFloat(document.getElementById('fxRateValue').value);
+  if (!asofDate || !(rate > 0)) { toast('Enter a valid date and rate', 'error'); return; }
+  const rows = loadFxRates().filter(row => !(row.currency === currency && row.asof_date === asofDate));
+  rows.push({ rate_id: uuid(), currency, asof_date: asofDate, rate_to_sgd: rate, source: 'manual', updated_at: new Date().toISOString() });
+  saveFxRates(rows);
+  document.getElementById('fxRateValue').value = '';
+  renderFxRates();
+  toast(`${currency} rate saved`);
+}
+
+async function deleteFxRate(rateId) {
+  if (!confirm('Delete this dated FX rate?')) return;
+  if (!(await backupBeforeDestructiveAction('delete the FX rate'))) return;
+  saveFxRates(loadFxRates().filter(row => row.rate_id !== rateId));
+  renderFxRates();
+  toast('FX rate deleted', 'info');
 }
 
 function applyFX() {
@@ -496,9 +533,9 @@ function applyFX() {
   const amount = parseFloat(document.getElementById('fxAmount').value)||0;
   const from = document.getElementById('fxFrom').value;
   const to = document.getElementById('fxTo').value;
-  const rate = FX[`${from}-${to}`];
-  if (!rate) { toast('FX pair not supported','error'); return; }
-  const converted = Math.round(amount*rate*100)/100;
+  const monthNumber = MONTHS.indexOf(month) + 1;
+  const rateDate = `${yearSel.value}-${String(monthNumber).padStart(2,'0')}-01`;
+  const converted = Math.round(appConvertCurrency(amount, from, to, rateDate)*100)/100;
   const row = invTableData.find(r=>r.invName===inv&&r.metric===metric);
   if (row) row[month] = converted;
   renderInvestmentPivot();
@@ -671,7 +708,9 @@ function addUselessExpense() {
   toast('Expense added');
 }
 
-function deleteUE(id) {
+async function deleteUE(id) {
+  if (!confirm('Delete this discretionary expense entry?')) return;
+  if (!(await backupBeforeDestructiveAction('delete the expense entry'))) return;
   let arr = loadUselessExpenses().filter(e=>!(e.entry_id===id && (e.profile || 'Abhi') === getActiveProfile()));
   saveUselessExpenses(arr);
   renderDisc();
@@ -775,11 +814,12 @@ function recordMatchesSection(recordType, section) {
   return section === 'incoming' ? recordType === 'income' : (recordType === 'expense' || recordType === 'tax');
 }
 
-function hideCategory() {
+async function hideCategory() {
   const name = document.getElementById('manageCatSel').value;
   const cats = loadCategories();
   const cat = cats.find(c=>c.category===name && c.section===currentSection);
   if(!cat){ toast('Not found','error'); return; }
+  if (!(await backupBeforeDestructiveAction('retire the category'))) return;
 
   if (currentSection === 'investments') {
     const valStr = prompt(`Retiring "${name}". Enter its value (S$) when stopped — this amount will be withdrawn to a Cash / Savings asset. Leave as 0 if there's nothing to withdraw.`, '0');
@@ -805,9 +845,10 @@ function hideCategory() {
   toast(`Retired: ${name}`);
 }
 
-function deleteCategory() {
+async function deleteCategory() {
   const name = document.getElementById('manageCatSel').value;
-  if(!confirm(`Delete "${name}" and all its records? This cannot be undone.`)) return;
+  if(!confirm(`Delete "${name}" and all its records? A Drive safety backup will be created first.`)) return;
+  if (!(await backupBeforeDestructiveAction('delete the category and its records'))) return;
   let cats = loadCategories().filter(c=>!(c.category===name && c.section===currentSection));
 
   if (currentSection === 'investments') {
@@ -829,7 +870,7 @@ function onManageCatChange() {
   document.getElementById('renameCatInput').value = name;
 }
 
-function renameCategory() {
+async function renameCategory() {
   const oldName = document.getElementById('manageCatSel').value;
   const newName = document.getElementById('renameCatInput').value.trim();
   if (!newName) { toast('New name cannot be empty', 'error'); return; }
@@ -841,6 +882,7 @@ function renameCategory() {
   // Rename in categories
   const cat = cats.find(c => c.category === oldName && c.section === currentSection);
   if (!cat) { toast('Category not found', 'error'); return; }
+  if (!(await backupBeforeDestructiveAction('rename the category'))) return;
   cat.category = newName;
   saveCategories(cats);
 
@@ -947,11 +989,7 @@ function renderAll() {
 // ── Boot ──────────────────────────────────────────────────
 
 async function refreshFromDrive() {
-  const overlay = document.getElementById('loadingOverlay');
-  const msg = document.getElementById('loadingMsg');
-  if (overlay) { overlay.style.display='flex'; overlay.style.opacity='1'; }
-  if (msg) msg.textContent = 'Refreshing from Google Drive…';
-  await loadFromDrive();
+  return reloadFromDriveSafely();
 }
 
 

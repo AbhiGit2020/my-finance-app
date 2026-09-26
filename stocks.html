@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="js/finance-core.js"></script>
 <script src="js/store.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 
@@ -31,6 +32,7 @@
     <a href="stocks.html" class="active">Portfolio</a>
     <a href="stock_tracker.html" class="">Watchlists</a>
     <a href="stock_compare.html" class="">Compare</a>
+    <a href="planning.html" class="">Plan</a>
     <a href="assets.html" class="">Assets</a>
   </div>
   <div class="nav-right">
@@ -180,23 +182,7 @@ function profile(){ return getActiveProfile(); }
 
 // ── Holdings computation ──────────────────────────────────
 function computeHoldings(txns){
-  const positions={}, realized={};
-  [...txns].sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(r=>{
-    const t=r.ticker; const qty=parseFloat(r.qty)||0; const price=parseFloat(r.price)||0;
-    const currency=String(r.currency||'SGD').toUpperCase();
-    const priceSgd=price*appStockFxToSgd(currency);
-    if(!positions[t]){positions[t]={qty:0,cost:0,currency};realized[t]=0;}
-    positions[t].currency=currency;
-    if(r.action==='BUY'){positions[t].qty+=qty;positions[t].cost+=qty*priceSgd;}
-    else{const avg=positions[t].qty?positions[t].cost/positions[t].qty:0;realized[t]+=qty*(priceSgd-avg);positions[t].qty-=qty;positions[t].cost-=qty*avg;}
-  });
-  const rows=[], realRows=[];
-  Object.entries(positions).forEach(([t,v])=>{
-    const avg=v.qty?v.cost/v.qty:0;
-    if(v.qty>0.0001) rows.push({ticker:t,qty:v.qty,currency:v.currency||'SGD',avg_cost:avg,cost_basis:v.cost,realized_pnl:realized[t]||0});
-    if((realized[t]||0)!==0) realRows.push({ticker:t,realized_pnl:realized[t],open_qty:v.qty});
-  });
-  return {holdings:rows, realRows};
+  return FinanceCore.computeHoldings(txns, (currency, date) => appFxToSgd(currency, date));
 }
 
 // ── Finnhub API ───────────────────────────────────────────
@@ -267,7 +253,7 @@ function render(){
   const rows=holdings.map(h=>{
     const latest=latestStockPrice(profile(),h.ticker);
     const close=parseFloat(latest?.close)||0;
-    const closeSgd=close*appStockFxToSgd(h.currency);
+    const closeSgd=close*appFxToSgd(h.currency, latest?.asof_date);
     const wkSnap=stockPriceAsOf(profile(),h.ticker,wkDate);
     const moSnap=stockPriceAsOf(profile(),h.ticker,moDate);
     const ytdSnap=stockPriceAsOf(profile(),h.ticker,ytdDate);
@@ -490,8 +476,9 @@ function saveEditTx(id){
   render(); toast('Transaction updated ✓');
 }
 
-function deleteTx(id){
+async function deleteTx(id){
   if(!confirm('Delete this transaction?')) return;
+  if (!(await backupBeforeDestructiveAction('delete the stock transaction'))) return;
   saveStockTransactions(loadStockTransactions().filter(t=>t.txn_id!==id));
   render(); toast('Deleted','info');
 }
@@ -553,16 +540,8 @@ function buildPortfolioChart() {
   const firstDate = sortedTxns[0]?.date || today;
 
   function holdingsAtDate(dateStr) {
-    const positions = {};
-    sortedTxns.forEach(t => {
-      if (t.date > dateStr) return;
-      const currency=String(t.currency||'SGD').toUpperCase();
-      if (!positions[t.ticker]) positions[t.ticker] = {qty:0, cost:0, currency};
-      positions[t.ticker].currency=currency;
-      if (t.action==='BUY') { positions[t.ticker].qty += parseFloat(t.qty)||0; positions[t.ticker].cost += (parseFloat(t.qty)||0)*(parseFloat(t.price)||0)*appStockFxToSgd(currency); }
-      else { const avg=positions[t.ticker].qty?positions[t.ticker].cost/positions[t.ticker].qty:0; positions[t.ticker].qty-=parseFloat(t.qty)||0; positions[t.ticker].cost-=(parseFloat(t.qty)||0)*avg; }
-    });
-    return positions;
+    const { holdings: datedHoldings } = computeHoldings(sortedTxns.filter(t => t.date <= dateStr));
+    return Object.fromEntries(datedHoldings.map(holding => [holding.ticker, holding]));
   }
 
   // Timeline points: buy dates + reference points, all sorted
@@ -587,7 +566,7 @@ function buildPortfolioChart() {
       const snap = stockPriceAsOf(profile(), ticker, dateStr);
       if (!snap) { byStock[ticker] = 0; return; }
       const price = parseFloat(snap.close) || 0;
-      const val = qty * price * appStockFxToSgd(pos[ticker]?.currency);
+      const val = qty * price * appFxToSgd(pos[ticker]?.currency, snap.asof_date);
       byStock[ticker] = val;
       total += val;
     });
@@ -728,11 +707,7 @@ function renderStockPerformance(data) {
 
 // ── Refresh from Drive ────────────────────────────────────
 async function refreshFromDrive() {
-  const overlay = document.getElementById('loadingOverlay');
-  const msg = document.getElementById('loadingMsg');
-  if (overlay) { overlay.style.display='flex'; overlay.style.opacity='1'; }
-  if (msg) msg.textContent = 'Refreshing from Google Drive…';
-  await loadFromDrive();
+  return reloadFromDriveSafely();
 }
 
 

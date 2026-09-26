@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="js/finance-core.js"></script>
 <script src="js/store.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
@@ -30,6 +31,7 @@
     <a href="stocks.html" class="">Portfolio</a>
     <a href="stock_tracker.html" class="active">Watchlists</a>
     <a href="stock_compare.html" class="">Compare</a>
+    <a href="planning.html" class="">Plan</a>
     <a href="assets.html" class="">Assets</a>
   </div>
   <div class="nav-right">
@@ -209,9 +211,10 @@ function createStarterWatchlists(){
   toast('Starter lists ready');
 }
 
-function retireSelectedWatchlist(){
+async function retireSelectedWatchlist(){
   const id=selectedWatchlistId();
   if(!id) return;
+  if (!(await backupBeforeDestructiveAction('retire the watchlist'))) return;
   const rows=loadStockWatchlists();
   const found=rows.find(w=>w.watchlist_id===id&&w.profile===profile());
   if(found){found.active=false;found.updated_at=new Date().toISOString();saveStockWatchlists(rows);}
@@ -239,7 +242,8 @@ function addTrackedSymbol(){
   toast(`Tracking ${symbol}`);
 }
 
-function removeTrackedSymbol(symbolId){
+async function removeTrackedSymbol(symbolId){
+  if (!(await backupBeforeDestructiveAction('remove the tracked symbol'))) return;
   const rows=loadStockTrackerSymbols();
   const found=rows.find(s=>s.symbol_id===symbolId&&s.profile===profile());
   if(found){found.active=false;found.updated_at=new Date().toISOString();saveStockTrackerSymbols(rows);}
@@ -360,7 +364,7 @@ function exportTrackerExcel(){
   ]);
 }
 
-async function refreshFromDrive(){const overlay=document.getElementById('loadingOverlay');const msg=document.getElementById('loadingMsg');if(overlay){overlay.style.display='flex';overlay.style.opacity='1';}if(msg)msg.textContent='Refreshing from Google Drive…';await loadFromDrive();}
+async function refreshFromDrive(){return reloadFromDriveSafely();}
 window.onProfileChange=function(){if(window.trackerChart){window.trackerChart.destroy();window.trackerChart=null;}};
 window.onDataLoaded=render;
 </script>

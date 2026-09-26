@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="js/finance-core.js"></script>
 <script src="js/store.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
@@ -31,6 +32,7 @@
     <a href="stocks.html" class="">Portfolio</a>
     <a href="stock_tracker.html" class="">Watchlists</a>
     <a href="stock_compare.html" class="active">Compare</a>
+    <a href="planning.html" class="">Plan</a>
     <a href="assets.html" class="">Assets</a>
   </div>
   <div class="nav-right">
@@ -298,7 +300,7 @@ function exportCompareExcel(){
   ]);
 }
 
-async function refreshFromDrive(){const overlay=document.getElementById('loadingOverlay');const msg=document.getElementById('loadingMsg');if(overlay){overlay.style.display='flex';overlay.style.opacity='1';}if(msg)msg.textContent='Refreshing from Google Drive…';await loadFromDrive();}
+async function refreshFromDrive(){return reloadFromDriveSafely();}
 window.onProfileChange=function(){if(window.compareChart){window.compareChart.destroy();window.compareChart=null;}};
 window.onDataLoaded=render;
 </script>

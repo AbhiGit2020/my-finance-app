@@ -7,13 +7,15 @@ const GOOGLE_CLIENT_ID = '356564967624-454aiiodg41u0l1ialidtmhlpj8erdtp.apps.goo
 const GOOGLE_SCOPES    = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_FOLDER     = 'MyFinanceApp';
 const DATA_FILENAME    = 'data.json';
+const DB_SCHEMA_VERSION = 1;
+const DATA_COLLECTION_KEYS = FinanceCore.DATA_COLLECTION_KEYS;
 
 const SS_TOKEN  = 'hf_gtoken';
 const SS_EXPIRY = 'hf_gtoken_exp';
 const SS_FOLDER = 'hf_gfolder';
 const SS_FILE   = 'hf_gfile';
 const SS_FINNHUB = 'hf_finnhub_key';
-const STOCK_FX_TO_SGD = { SGD:1, USD:1.35, EUR:1.46, INR:0.0161, GBP:1.72, HKD:0.173, AUD:0.91 };
+const STOCK_FX_TO_SGD = FinanceCore.DEFAULT_FX_TO_SGD;
 
 // ── Finnhub API key (kept out of source — stored locally only) ──
 function getFinnhubKey() {
@@ -32,15 +34,27 @@ let _fileId      = null;
 let _signedIn    = false;
 let _dataReady   = false;
 let _driveLoadFailed = false;
+let _loadedDriveVersion = null;
+let _loadedDriveModifiedTime = null;
 
 // ── Empty DB ──────────────────────────────────────────────
 function emptyDb() {
   return {
+    schema_version: DB_SCHEMA_VERSION,
     finance_records:[], finance_categories:[], useless_expenses:[],
     stock_transactions:[], stock_prices:[], stock_watchlists:[],
     stock_tracker_symbols:[], stock_tracker_prices:[], assets_master:[],
-    asset_values:[], investment_data:[],
+    asset_values:[], investment_data:[], fx_rates:[], budget_targets:[],
+    recurring_transactions:[], planning_settings:[],
   };
+}
+
+function normalizeDb(data) {
+  const normalized = { ...emptyDb(), ...FinanceCore.normalizeDatabase(data, DB_SCHEMA_VERSION) };
+  normalized.assets_master = normalized.assets_master.map(asset =>
+    asset && asset.owner === 'Kid' ? { ...asset, owner: 'Kids' } : asset
+  );
+  return normalized;
 }
 
 
@@ -255,14 +269,21 @@ async function ensureFile() {
   _ensureFilePromise = (async () => {
     const folderId = await ensureFolder();
     const q = encodeURIComponent(`name='${DATA_FILENAME}' and '${folderId}' in parents and trashed=false`);
-    const r = await driveGet(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`);
+    const r = await driveGet(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,version,modifiedTime)`);
     if (r.files && r.files.length > 0) {
       _fileId = r.files[0].id;
+      _loadedDriveVersion = String(r.files[0].version || '');
+      _loadedDriveModifiedTime = r.files[0].modifiedTime || null;
       sessionStorage.setItem(SS_FILE, _fileId);
     }
     return _fileId || null;
   })();
   try { return await _ensureFilePromise; } finally { _ensureFilePromise = null; }
+}
+
+async function getDriveFileMetadata(fileId = _fileId) {
+  if (!fileId) return null;
+  return driveGet(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,version,modifiedTime,size`);
 }
 
 // ── Load from Drive ───────────────────────────────────────
@@ -282,7 +303,10 @@ async function loadFromDrive() {
     const res = await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
     if (!res.ok) throw new Error('Download failed ' + res.status);
     const data = await res.json();
-    _db = { ...emptyDb(), ...data };
+    _db = normalizeDb(data);
+    const metadata = await getDriveFileMetadata(fileId);
+    _loadedDriveVersion = String(metadata?.version || '');
+    _loadedDriveModifiedTime = metadata?.modifiedTime || null;
     _driveLoadFailed = false;
     _dataReady = true;
     showStatus('✅ Loaded from Drive', 'var(--green)');
@@ -296,6 +320,30 @@ async function loadFromDrive() {
   }
 }
 
+async function reloadFromDriveSafely() {
+  if (!_accessToken) { showStatus('⚠️ Not signed in', 'var(--yellow)'); return false; }
+  if (_unsavedChanges && !confirm('Reload from Drive and discard the unsaved changes in this tab?')) return false;
+  const overlay = document.getElementById('loadingOverlay');
+  const msg = document.getElementById('loadingMsg');
+  if (overlay) { overlay.style.display = 'flex'; overlay.style.opacity = '1'; }
+  if (msg) msg.textContent = 'Refreshing from Google Drive…';
+  _fileId = null;
+  sessionStorage.removeItem(SS_FILE);
+  await loadFromDrive();
+  return !_driveLoadFailed;
+}
+
+async function uploadDriveSnapshot(name, data = _db) {
+  const folderId = await ensureFolder();
+  const blob = new Blob([JSON.stringify({ ...data, schema_version: DB_SCHEMA_VERSION, saved_at: new Date().toISOString() }, null, 2)], { type: 'application/json' });
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify({ name, parents: [folderId] })], { type: 'application/json' }));
+  form.append('file', blob);
+  const res = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { method: 'POST', body: form });
+  if (!res.ok) throw new Error('Drive snapshot failed ' + res.status);
+  return res.json();
+}
+
 // ── Save to Drive (overwrite only) ────────────────────────
 async function driveSave() {
   if (!_accessToken) { showStatus('⚠️ Not signed in', 'var(--yellow)'); return false; }
@@ -306,25 +354,40 @@ async function driveSave() {
   }
   try {
     showStatus('⏳ Saving to Google Drive…');
-    const blob = new Blob([JSON.stringify({ ..._db, saved_at: new Date().toISOString() }, null, 2)], { type: 'application/json' });
     const folderId = await ensureFolder();
+    const payload = { ..._db, schema_version: DB_SCHEMA_VERSION, saved_at: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
 
     if (_fileId) {
-      const res = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${_fileId}?uploadType=media`, {
+      const metadata = await getDriveFileMetadata();
+      if (_loadedDriveVersion && String(metadata?.version || '') !== _loadedDriveVersion) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        await uploadDriveSnapshot(`conflict_local_${ts}.json`, payload);
+        showStatus('⚠️ Save blocked: Drive has a newer version', 'var(--red)');
+        alert('This Drive file changed after this tab loaded it. Your local changes were preserved in a conflict_local backup. Refresh from Drive before editing again.');
+        return false;
+      }
+      const res = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${_fileId}?uploadType=media&fields=id,version,modifiedTime`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: blob,
       });
       if (!res.ok) throw new Error('Drive PATCH failed ' + res.status);
+      const updated = await res.json();
+      _loadedDriveVersion = String(updated.version || '');
+      _loadedDriveModifiedTime = updated.modifiedTime || null;
     } else {
       const form = new FormData();
       form.append('metadata', new Blob([JSON.stringify({ name: DATA_FILENAME, parents: [folderId] })], { type: 'application/json' }));
       form.append('file', blob);
-      const res = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      const res = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,version,modifiedTime', {
         method: 'POST', body: form,
       });
       if (!res.ok) throw new Error('Drive create failed ' + res.status);
-      _fileId = (await res.json()).id;
+      const created = await res.json();
+      _fileId = created.id;
+      _loadedDriveVersion = String(created.version || '');
+      _loadedDriveModifiedTime = created.modifiedTime || null;
       sessionStorage.setItem(SS_FILE, _fileId);
     }
     _unsavedChanges = false; _lastSaveTime = Date.now(); showStatus(`✅ Saved to Google Drive — ${new Date().toLocaleTimeString()}`, 'var(--green)');
@@ -347,22 +410,25 @@ async function driveBackup() {
   try {
     const saved = await driveSave(); // ensure latest saved first
     if (!saved) return false;
-    const folderId = await ensureFolder();
     const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,16);
-    const blob = new Blob([JSON.stringify({ ..._db, saved_at: new Date().toISOString() }, null, 2)], { type: 'application/json' });
-    const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify({ name: `backup_${ts}.json`, parents: [folderId] })], { type: 'application/json' }));
-    form.append('file', blob);
-    const res = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-      method: 'POST', body: form,
-    });
-    if (!res.ok) throw new Error('Drive backup failed ' + res.status);
+    await uploadDriveSnapshot(`backup_${ts}.json`);
     showStatus(`✅ Backup saved: backup_${ts}.json`, 'var(--green)');
     return true;
   } catch(e) {
     showStatus('⚠️ Backup failed', 'var(--red)');
     return false;
   }
+}
+
+async function backupBeforeDestructiveAction(label) {
+  if (!_signedIn) {
+    alert(`Cannot ${label} safely while Drive is disconnected. Sign in and try again so a backup can be created first.`);
+    return false;
+  }
+  showStatus('⏳ Creating safety backup…');
+  const ok = await driveBackup();
+  if (!ok) alert(`The safety backup failed, so ${label} was cancelled.`);
+  return ok;
 }
 
 // Keep driveSync as alias (used in pages) — just save, no backup
@@ -383,6 +449,10 @@ function loadStockTrackerPrices()  { return _db.stock_tracker_prices  || []; }
 function loadAssetsMaster()      { return _db.assets_master      || []; }
 function loadAssetValues()       { return _db.asset_values       || []; }
 function loadInvestmentData()    { return _db.investment_data    || []; }
+function loadFxRates()           { return _db.fx_rates           || []; }
+function loadBudgetTargets()     { return _db.budget_targets     || []; }
+function loadRecurringTransactions() { return _db.recurring_transactions || []; }
+function loadPlanningSettings()  { return _db.planning_settings  || []; }
 
 function saveFinanceRecords(arr)    { _db.finance_records    = arr; markUnsaved(); }
 function recordProfile(row) { return row && row.profile ? row.profile : 'Abhi'; }
@@ -399,6 +469,10 @@ function saveStockTrackerPrices(arr)  { _db.stock_tracker_prices  = arr; markUns
 function saveAssetsMaster(arr)      { _db.assets_master      = arr; markUnsaved(); }
 function saveAssetValues(arr)       { _db.asset_values       = arr; markUnsaved(); }
 function saveInvestmentData(arr)    { _db.investment_data    = arr; markUnsaved(); }
+function saveFxRates(arr)            { _db.fx_rates           = arr; markUnsaved(); }
+function saveBudgetTargets(arr)      { _db.budget_targets     = arr; markUnsaved(); }
+function saveRecurringTransactions(arr) { _db.recurring_transactions = arr; markUnsaved(); }
+function savePlanningSettings(arr)   { _db.planning_settings  = arr; markUnsaved(); }
 
 // ── Withdraw a retired investment's value into a Cash / Savings asset ──
 function withdrawInvestmentToSavings(profile, sourceName, amount) {
@@ -448,6 +522,10 @@ function exportAllData() {
     { name:'assets_master',      data: loadAssetsMaster() },
     { name:'asset_values',       data: loadAssetValues() },
     { name:'investment_data',    data: loadInvestmentData() },
+    { name:'fx_rates',           data: loadFxRates() },
+    { name:'budget_targets',     data: loadBudgetTargets() },
+    { name:'recurring_transactions', data: loadRecurringTransactions() },
+    { name:'planning_settings',  data: loadPlanningSettings() },
   ]);
 }
 function exportJsonBackup() {
@@ -458,7 +536,15 @@ function exportJsonBackup() {
   a.click();
 }
 function appStockFxToSgd(currency) {
-  return STOCK_FX_TO_SGD[String(currency || 'SGD').toUpperCase()] || 1;
+  return FinanceCore.fxRateToSgd(currency, new Date().toISOString().slice(0, 10), loadFxRates(), STOCK_FX_TO_SGD);
+}
+function appFxToSgd(currency, date) {
+  return FinanceCore.fxRateToSgd(currency, date, loadFxRates(), STOCK_FX_TO_SGD);
+}
+function appConvertCurrency(amount, fromCurrency, toCurrency, date) {
+  const fromSgd = appFxToSgd(fromCurrency, date);
+  const toSgd = appFxToSgd(toCurrency, date);
+  return toSgd > 0 ? (FinanceCore.number(amount) * fromSgd / toSgd) : 0;
 }
 
 // stock_prices now accumulates a dated history per (profile,ticker) instead of
@@ -480,15 +566,16 @@ function importJsonBackup() {
     const file = input.files && input.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const data = JSON.parse(reader.result);
-        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid JSON backup');
-        const knownKeys = Object.keys(emptyDb());
+        const knownKeys = DATA_COLLECTION_KEYS;
         const hasKnownData = knownKeys.some(k => Array.isArray(data[k]));
         if (!hasKnownData) throw new Error('This file does not look like a MyFinance backup');
+        const normalized = normalizeDb(data);
         if (!confirm('Import this JSON backup into the app? Review the data, then click Save to Drive if it looks right.')) return;
-        _db = { ...emptyDb(), ...data };
+        if (_signedIn && !(await driveBackup())) throw new Error('Could not back up the current Drive data before import');
+        _db = normalized;
         if (!(_db.finance_categories && _db.finance_categories.length)) _db.finance_categories = seedCategories(2024);
         _driveLoadFailed = false;
         _dataReady = true;
@@ -511,18 +598,11 @@ function appHealthSnapshot() {
   const stockPrices = db.stock_prices || [];
   const openHoldings = [];
   profiles.forEach(profile => {
-    const positions = {};
-    stockTx.filter(t => t.profile === profile).sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(t => {
-      const ticker = String(t.ticker || '').toUpperCase();
-      if (!ticker) return;
-      if (!positions[ticker]) positions[ticker] = { qty:0 };
-      const qty = parseFloat(t.qty) || 0;
-      if (t.action === 'BUY') positions[ticker].qty += qty;
-      else positions[ticker].qty -= qty;
-    });
-    Object.entries(positions).forEach(([ticker,pos]) => {
-      if (pos.qty > 0.0001) openHoldings.push({ profile, ticker });
-    });
+    const result = FinanceCore.computeHoldings(
+      stockTx.filter(t => t.profile === profile),
+      (currency, date) => appFxToSgd(currency, date)
+    );
+    result.holdings.forEach(holding => openHoldings.push({ profile, ticker: holding.ticker }));
   });
   const priceKeys = new Set(stockPrices.map(p => `${p.profile || 'Abhi'}|${String(p.ticker || '').toUpperCase()}`));
   const missingStockPrices = openHoldings.filter(h => !priceKeys.has(`${h.profile}|${h.ticker}`));
@@ -536,6 +616,9 @@ function appHealthSnapshot() {
     unsaved:_unsavedChanges,
     driveLoadFailed:_driveLoadFailed,
     lastSaveTime:_lastSaveTime,
+    schemaVersion:db.schema_version,
+    driveVersion:_loadedDriveVersion,
+    driveModifiedTime:_loadedDriveModifiedTime,
     counts:{
       finance_records:db.finance_records.length,
       investment_data:db.investment_data.length,
@@ -543,6 +626,7 @@ function appHealthSnapshot() {
       stock_prices:db.stock_prices.length,
       tracked_symbols:tracked.length,
       assets:db.assets_master.length + db.asset_values.length,
+      planning:db.budget_targets.length + db.recurring_transactions.length,
     },
     missingStockPrices,
     missingCompareBaselines,
@@ -551,6 +635,7 @@ function appHealthSnapshot() {
 
 // ── UUID & constants ──────────────────────────────────────
 function uuid() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16);
   });
@@ -594,7 +679,6 @@ function markUnsaved() {
     if (_unsavedChanges && _signedIn) {
       showStatus('⏳ Auto-saving…');
       await driveSave();
-      _unsavedChanges = false;
     }
   }, AUTO_SAVE_INTERVAL);
   // Update status indicator

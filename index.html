@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="js/finance-core.js"></script>
 <script src="js/store.js"></script>
 <style>
 .chart-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
@@ -17,6 +18,7 @@
 .lkpi-label { font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; }
 .lkpi-value { font-size:1.5rem; font-weight:700; font-family:'IBM Plex Mono',monospace; }
 .lkpi-sub { font-size:0.78rem; color:var(--text-muted); margin-top:4px; }
+.lkpi-sub a { color:var(--teal); }
 .drill-section { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
 .year-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px; }
 .year-tab { background:var(--bg3); border:1px solid var(--border); color:var(--text-muted); border-radius:6px; padding:5px 14px; font-size:0.84rem; font-weight:600; cursor:pointer; transition:all 0.15s; }
@@ -36,6 +38,7 @@
     <a href="stocks.html" class="">Portfolio</a>
     <a href="stock_tracker.html" class="">Watchlists</a>
     <a href="stock_compare.html" class="">Compare</a>
+    <a href="planning.html" class="">Plan</a>
     <a href="assets.html" class="">Assets</a>
   </div>
   <div class="nav-right">
@@ -68,7 +71,7 @@
     <div class="chart-wrap"><canvas id="annualChart"></canvas></div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+  <div class="dashboard-split">
     <div class="chart-card" style="margin-bottom:0">
       <div class="chart-title">Investment % of Income by Year</div>
       <div class="chart-wrap"><canvas id="invPctChart"></canvas></div>
@@ -107,17 +110,7 @@ function getYears() {
 }
 
 function getAnnualTotals(year) {
-  // Income and expenses from finance records
-  const recs = getProfileRecords().filter(r => r.year === year);
-  let income=0, outgoing=0;
-  recs.forEach(r => {
-    if(r.type==='income') income += r.amount;
-    else if(r.type==='expense' || r.type==='tax') outgoing += r.amount;
-  });
-  // Investments from investment data (monthly_investment rows only)
-  const invRecs = loadInvestmentData().filter(r => (r.profile || 'Abhi') === getActiveProfile() && r.year === year && r.metric === 'monthly_investment');
-  const invested = invRecs.reduce((s,r) => s + (parseFloat(r.amount)||0), 0);
-  return { income, outgoing, invested, savings: income - outgoing - invested };
+  return FinanceCore.annualTotals(loadFinanceRecords(), loadInvestmentData(), getActiveProfile(), year);
 }
 
 function renderDataHealth() {
@@ -128,6 +121,8 @@ function renderDataHealth() {
   const saveColor = h.driveLoadFailed ? 'var(--red)' : h.unsaved ? 'var(--yellow)' : 'var(--green)';
   const priceColor = h.missingStockPrices.length ? 'var(--yellow)' : 'var(--green)';
   const baselineColor = h.missingCompareBaselines.length ? 'var(--yellow)' : 'var(--green)';
+  const missingPrices = h.missingStockPrices.slice(0,4).map(x=>escapeHtml(`${x.profile}: ${x.ticker}`)).join(', ');
+  const missingBaselines = h.missingCompareBaselines.slice(0,4).map(x=>escapeHtml(`${x.profile || 'Abhi'}: ${x.symbol}`)).join(', ');
   document.getElementById('dataHealth').innerHTML = `
     <div class="lkpi" style="border-color:${saveColor}">
       <div class="lkpi-label">Data Health</div>
@@ -142,12 +137,12 @@ function renderDataHealth() {
     <div class="lkpi" style="border-color:${priceColor}">
       <div class="lkpi-label">Stock Prices</div>
       <div class="lkpi-value" style="color:${priceColor};font-size:1.1rem">${h.missingStockPrices.length?fmt(h.missingStockPrices.length):'OK'}</div>
-      <div class="lkpi-sub">${h.missingStockPrices.length?'Open holdings missing current price':'All open holdings have prices'}</div>
+      <div class="lkpi-sub">${h.missingStockPrices.length?`${missingPrices}${h.missingStockPrices.length>4?' + more':''} · <a href="stocks.html">Update</a>`:'All open holdings have prices'}</div>
     </div>
     <div class="lkpi" style="border-color:${baselineColor}">
       <div class="lkpi-label">Compare Baselines</div>
       <div class="lkpi-value" style="color:${baselineColor};font-size:1.1rem">${h.missingCompareBaselines.length?fmt(h.missingCompareBaselines.length):'OK'}</div>
-      <div class="lkpi-sub">${h.missingCompareBaselines.length?'Tracked symbols missing Jan 1 2025':'Tracked symbols have baselines'}</div>
+      <div class="lkpi-sub">${h.missingCompareBaselines.length?`${missingBaselines}${h.missingCompareBaselines.length>4?' + more':''} · <a href="stock_compare.html">Resolve</a>`:'Tracked symbols have baselines'}</div>
     </div>
   `;
 }
@@ -184,7 +179,7 @@ function render() {
   const invGainPct = investedTotal > 0 ? (invGainLoss/investedTotal*100) : 0;
 
   // Assets by type (latest value)
-  const assets = loadAssetsMaster().filter(a=>a.active);
+  const assets = loadAssetsMaster().filter(a=>a.active && (a.owner || 'Abhi') === getActiveProfile());
   const assetVals = loadAssetValues();
   function latestAssetVal(assetId) {
     const vals = assetVals.filter(v=>v.asset_id===assetId);
@@ -209,32 +204,21 @@ function render() {
     if(group) assetTotals[group[0]] += val;
   });
 
-  // Stocks — all profiles
-  const allProfiles = ['Abhi','Wife','Kids','Joint'];
+  // Stocks for the active profile, matching the rest of this dashboard.
+  const allProfiles = [getActiveProfile()];
   let totalStockValue = 0, totalUnrealized = 0;
   allProfiles.forEach(prof => {
     const ptxns = loadStockTransactions().filter(r=>r.profile===prof);
     if(!ptxns.length) return;
-    // compute holdings
-    const positions = {};
-    [...ptxns].sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(t=>{
-      const currency=String(t.currency||'SGD').toUpperCase();
-      if(!positions[t.ticker]) positions[t.ticker]={qty:0,cost:0,currency};
-      positions[t.ticker].currency=currency;
-      const qty=parseFloat(t.qty)||0, price=parseFloat(t.price)||0;
-      if(t.action==='BUY'){positions[t.ticker].qty+=qty;positions[t.ticker].cost+=qty*price*appStockFxToSgd(currency);}
-      else{const avg=positions[t.ticker].qty?positions[t.ticker].cost/positions[t.ticker].qty:0;positions[t.ticker].qty-=qty;positions[t.ticker].cost-=qty*avg;}
-    });
-    Object.entries(positions).forEach(([ticker,pos])=>{
-      if(pos.qty<=0) return;
-      const p=latestStockPrice(prof,ticker);
+    const { holdings } = FinanceCore.computeHoldings(ptxns, (currency, date) => appFxToSgd(currency, date));
+    holdings.forEach(holding=>{
+      const p=latestStockPrice(prof,holding.ticker);
       if(!p) return;
       const close=parseFloat(p.close)||0;
-      const closeSgd=close*appStockFxToSgd(pos.currency);
-      const mv=pos.qty*closeSgd;
-      const avgCost=pos.qty?pos.cost/pos.qty:0;
+      const closeSgd=close*appFxToSgd(holding.currency,p.asof_date);
+      const mv=holding.qty*closeSgd;
       totalStockValue+=mv;
-      totalUnrealized+=(closeSgd-avgCost)*pos.qty;
+      totalUnrealized+=(closeSgd-holding.avg_cost)*holding.qty;
     });
   });
 
@@ -264,7 +248,7 @@ function render() {
       <div class="lkpi-sub" style="color:${invGainLoss>=0?'var(--green)':'var(--red)'}">${invGainLoss>=0?'▲':'▼'} ${fmtPct(Math.abs(invGainPct))} vs invested</div>
     </div>
     <div class="lkpi" style="border-color:var(--teal)">
-      <div class="lkpi-label">Stock Portfolio (All)</div>
+      <div class="lkpi-label">Stock Portfolio</div>
       <div class="lkpi-value" style="color:var(--teal)">S$ ${fmt(totalStockValue)}</div>
       <div class="lkpi-sub" style="color:${totalUnrealized>=0?'var(--green)':'var(--red)'}">${totalUnrealized>=0?'▲':'▼'} S$ ${fmt(Math.abs(totalUnrealized))} unrealized</div>
     </div>
@@ -515,11 +499,7 @@ function renderEmpty() {
 
 // ── Refresh from Drive ────────────────────────────────────
 async function refreshFromDrive() {
-  const overlay = document.getElementById('loadingOverlay');
-  const msg = document.getElementById('loadingMsg');
-  if (overlay) { overlay.style.display='flex'; overlay.style.opacity='1'; }
-  if (msg) msg.textContent = 'Refreshing from Google Drive…';
-  await loadFromDrive();
+  return reloadFromDriveSafely();
 }
 
 window.onDataLoaded = render;

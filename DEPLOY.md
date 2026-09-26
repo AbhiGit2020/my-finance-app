@@ -6,16 +6,19 @@
 hoku-finance/
 ├── index.html          ← Dashboard
 ├── input.html          ← Finance Input (income/outgoing)
-├── investments.html    ← Investment tracker
-├── stocks.html         ← Stock portfolio + Yahoo prices
+├── stocks.html         ← Stock portfolio + Finnhub prices
+├── stock_tracker.html  ← Watchlists
+├── stock_compare.html  ← Price comparison
+├── planning.html       ← Budgets, recurring entries, net worth, retirement, CSV import
 ├── assets.html         ← Assets / Net Worth
 ├── css/
 │   └── style.css
 └── js/
-    └── store.js        ← All data logic (localStorage)
+    ├── finance-core.js ← Shared, tested financial calculations
+    └── store.js        ← Google Drive persistence and app data access
 ```
 
-All data is stored in your **browser's localStorage** — no server, no database, no cost.
+Finance data is stored in `MyFinanceApp/data.json` in the signed-in user's Google Drive. Browser storage contains only UI preferences and the Finnhub API key.
 
 ---
 
@@ -65,7 +68,7 @@ git push -u origin main
 5. Wait ~2 minutes
 
 Your app will be live at:
-**`https://YOUR_USERNAME.github.io/my-finance-app/`**
+**`https://abhigit2020.github.io/my-finance-app/`**
 
 ---
 
@@ -88,10 +91,10 @@ Or use the **Upload files** button to replace files.
 
 ## Data backup
 
-Your data is in your browser's localStorage. To back it up:
-1. Click **💾 Backup JSON** in any page header
-2. This downloads a `.json` file with ALL your data
-3. To restore: currently you'd re-enter data (full import UI can be added later)
+Your data is in Google Drive. To back it up:
+1. Click the backup button in any page header to create a timestamped copy beside `data.json`.
+2. Use **JSON** export to download an offline backup.
+3. Use **JSON** import to restore a backup; the app creates a Drive safety backup before replacing the in-memory data.
 
 **Export to Excel** works from any page header too.
 
@@ -99,16 +102,16 @@ Your data is in your browser's localStorage. To back it up:
 
 ## Important notes
 
-- **Data is browser-specific**: Data on your laptop browser is separate from your phone browser. Use **Export Excel / JSON** to move data between devices.
+- **Data is Drive-backed**: Sign in with the same Google account to use the same data on another device.
 - **Incognito mode**: localStorage doesn't persist in incognito. Use normal browser windows.
-- **Clearing browser data**: If you clear site data, your finance data will be deleted. Back up first!
-- **No login / no password**: Anyone with your URL can see the app (but not your data — data is in YOUR browser only, not hosted anywhere).
+- **Conflict protection**: If another tab or device changes `data.json`, saving is blocked and the local version is stored as a `conflict_local_*.json` file.
+- **Privacy**: The public site contains no finance data. Google Drive access is required to load the user's private data file.
 
 ---
 
 ## Stock prices note
 
-The Yahoo Finance fetch works directly from your browser. If it fails (CORS or network issue), use the **Manual Price Entry** section to enter prices yourself. Prices are stored locally.
+Finnhub quotes are fetched directly from the browser. If a quote fails, use **Manual Price Entry**. The Finnhub key stays in that browser's local storage; saved prices are stored in Drive.
 
 ---
 
