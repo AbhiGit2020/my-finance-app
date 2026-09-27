@@ -743,7 +743,7 @@ function savePivot() {
   });
   saveFinanceRecords(records);
   renderHistTable();
-  driveSync().then(ok => toast(ok ? '✅ Saved to Drive' : 'Saved locally (sign in to sync)'));
+  driveSync().then(ok => toast(ok ? 'Saved to Drive' : 'Drive save failed; changes remain in this tab', ok ? 'success' : 'error'));
 
 }
 
@@ -771,7 +771,7 @@ function saveInvestmentPivot() {
   });
   saveInvestmentData(stored);
   renderInvestmentSummary();
-  driveSync().then(ok => toast(ok ? '✅ Investments saved to Drive' : 'Saved locally (sign in to sync)'));
+  driveSync().then(ok => toast(ok ? 'Investments saved to Drive' : 'Drive save failed; changes remain in this tab', ok ? 'success' : 'error'));
 }
 
 // ── Category management ───────────────────────────────────

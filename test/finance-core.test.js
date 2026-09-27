@@ -62,6 +62,31 @@ test('normalizeDatabase rejects malformed and newer data', () => {
   assert.throws(() => core.normalizeDatabase({ schema_version: 2 }, 1), /supports up to 1/);
 });
 
+test('mergeDatabases combines local edits with unrelated remote changes', () => {
+  const base = {
+    finance_records: [{ record_id: 'old', amount: 10 }],
+    assets_master: [{ asset_id: 'asset-1', asset_name: 'Cash' }],
+  };
+  const local = {
+    finance_records: [{ record_id: 'new', amount: 25 }],
+    assets_master: [{ asset_id: 'asset-1', asset_name: 'Cash' }],
+  };
+  const remote = {
+    finance_records: [{ record_id: 'old', amount: 10 }, { record_id: 'remote', amount: 30 }],
+    assets_master: [{ asset_id: 'asset-1', asset_name: 'Savings' }],
+  };
+  const merged = core.mergeDatabases(base, local, remote);
+  assert.deepEqual(merged.finance_records, [{ record_id: 'remote', amount: 30 }, { record_id: 'new', amount: 25 }]);
+  assert.deepEqual(merged.assets_master, [{ asset_id: 'asset-1', asset_name: 'Savings' }]);
+});
+
+test('mergeDatabases gives an intentional local edit precedence on the same row', () => {
+  const base = { budget_targets: [{ budget_id: 'b1', monthly_target: 100 }] };
+  const local = { budget_targets: [{ budget_id: 'b1', monthly_target: 120 }] };
+  const remote = { budget_targets: [{ budget_id: 'b1', monthly_target: 110 }] };
+  assert.equal(core.mergeDatabases(base, local, remote).budget_targets[0].monthly_target, 120);
+});
+
 test('occurrenceDates clamps month-end schedules without skipping February', () => {
   assert.deepEqual(core.occurrenceDates({ start_date: '2025-01-31', frequency: 'monthly' }, '2025-04-30'), [
     '2025-01-31', '2025-02-28', '2025-03-31', '2025-04-30',

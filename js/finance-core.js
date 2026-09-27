@@ -21,6 +21,23 @@
     'asset_values', 'investment_data', 'fx_rates', 'budget_targets',
     'recurring_transactions', 'planning_settings',
   ]);
+  const COLLECTION_ID_FIELDS = Object.freeze({
+    finance_records: ['record_id'],
+    finance_categories: ['category_id'],
+    useless_expenses: ['entry_id'],
+    stock_transactions: ['txn_id'],
+    stock_prices: ['profile', 'ticker', 'asof_date'],
+    stock_watchlists: ['watchlist_id'],
+    stock_tracker_symbols: ['symbol_id'],
+    stock_tracker_prices: ['price_id'],
+    assets_master: ['asset_id'],
+    asset_values: ['valuation_id'],
+    investment_data: ['record_id'],
+    fx_rates: ['rate_id'],
+    budget_targets: ['budget_id'],
+    recurring_transactions: ['recurring_id'],
+    planning_settings: ['setting_id'],
+  });
 
   function number(value) {
     const parsed = Number.parseFloat(value);
@@ -127,6 +144,58 @@
     return normalized;
   }
 
+  function rowIdentity(collection, row, index = 0) {
+    const configured = COLLECTION_ID_FIELDS[collection] || [];
+    if (configured.length && configured.every(field => row?.[field] !== undefined && row?.[field] !== '')) {
+      return configured.map(field => String(row[field])).join('|');
+    }
+    const fallbacks = {
+      finance_records: ['profile', 'year', 'month', 'type', 'category', 'created_at'],
+      finance_categories: ['section', 'category', 'start_year'],
+      useless_expenses: ['profile', 'date', 'amount_sgd', 'note'],
+      stock_transactions: ['profile', 'ticker', 'date', 'action', 'qty', 'price'],
+      stock_tracker_prices: ['profile', 'symbol', 'asof_date'],
+      asset_values: ['asset_id', 'date', 'created_at'],
+      investment_data: ['profile', 'year', 'month', 'category', 'metric'],
+      planning_settings: ['profile'],
+    };
+    const fields = fallbacks[collection] || [];
+    if (fields.length && fields.some(field => row?.[field] !== undefined && row?.[field] !== '')) {
+      return fields.map(field => String(row?.[field] ?? '')).join('|');
+    }
+    return `row-${index}-${JSON.stringify(row)}`;
+  }
+
+  function rowsEqual(left, right) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  function mergeCollection(collection, baseRows, localRows, remoteRows) {
+    const toMap = rows => new Map((rows || []).map((row, index) => [rowIdentity(collection, row, index), row]));
+    const base = toMap(baseRows);
+    const local = toMap(localRows);
+    const merged = toMap(remoteRows);
+
+    base.forEach((_, key) => {
+      if (!local.has(key)) merged.delete(key);
+    });
+    local.forEach((row, key) => {
+      if (!base.has(key) || !rowsEqual(row, base.get(key))) merged.set(key, row);
+    });
+    return [...merged.values()];
+  }
+
+  function mergeDatabases(baseData, localData, remoteData, schemaVersion = 1) {
+    const base = normalizeDatabase(baseData || {}, schemaVersion);
+    const local = normalizeDatabase(localData || {}, schemaVersion);
+    const remote = normalizeDatabase(remoteData || {}, schemaVersion);
+    const merged = { ...remote, ...local, schema_version: schemaVersion };
+    DATA_COLLECTION_KEYS.forEach(collection => {
+      merged[collection] = mergeCollection(collection, base[collection], local[collection], remote[collection]);
+    });
+    return merged;
+  }
+
   function occurrenceDates(schedule, throughDate) {
     const [startYear, startMonth, startDay] = String(schedule.start_date || '').split('-').map(Number);
     if (!startYear || !startMonth || !startDay || !throughDate) return [];
@@ -157,5 +226,5 @@
     return { years, projected, target, gap: projected - target };
   }
 
-  return { DEFAULT_FX_TO_SGD, DATA_COLLECTION_KEYS, number, latestDatedRow, fxRateToSgd, convertToSgd, computeHoldings, annualTotals, normalizeDatabase, occurrenceDates, projectRetirement };
+  return { DEFAULT_FX_TO_SGD, DATA_COLLECTION_KEYS, number, latestDatedRow, fxRateToSgd, convertToSgd, computeHoldings, annualTotals, normalizeDatabase, mergeDatabases, occurrenceDates, projectRetirement };
 });

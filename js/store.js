@@ -36,6 +36,7 @@ let _dataReady   = false;
 let _driveLoadFailed = false;
 let _loadedDriveVersion = null;
 let _loadedDriveModifiedTime = null;
+let _baseDb = emptyDb();
 
 // ── Empty DB ──────────────────────────────────────────────
 function emptyDb() {
@@ -55,6 +56,10 @@ function normalizeDb(data) {
     asset && asset.owner === 'Kid' ? { ...asset, owner: 'Kids' } : asset
   );
   return normalized;
+}
+
+function cloneDb(data) {
+  return JSON.parse(JSON.stringify(data));
 }
 
 
@@ -173,6 +178,7 @@ function initGoogleAuth() {
       // Not signed in — render with empty/seed data
       _db = emptyDb();
       _db.finance_categories = seedCategories(2024);
+      _baseDb = cloneDb(_db);
       _dataReady = true;
       triggerRender();
       resolve(null);
@@ -191,6 +197,9 @@ function signOut() {
   clearSession();
   _db = emptyDb();
   _db.finance_categories = seedCategories(2024);
+  _baseDb = cloneDb(_db);
+  _loadedDriveVersion = null;
+  _loadedDriveModifiedTime = null;
   updateAuthUI(false);
   triggerRender();
 }
@@ -296,6 +305,7 @@ async function loadFromDrive() {
       showStatus('New file — save to create.', 'var(--text-muted)');
       _db = emptyDb();
       _db.finance_categories = seedCategories(2024);
+      _baseDb = cloneDb(_db);
       _dataReady = true;
       triggerRender();
       return;
@@ -304,6 +314,7 @@ async function loadFromDrive() {
     if (!res.ok) throw new Error('Download failed ' + res.status);
     const data = await res.json();
     _db = normalizeDb(data);
+    _baseDb = cloneDb(_db);
     const metadata = await getDriveFileMetadata(fileId);
     _loadedDriveVersion = String(metadata?.version || '');
     _loadedDriveModifiedTime = metadata?.modifiedTime || null;
@@ -344,8 +355,17 @@ async function uploadDriveSnapshot(name, data = _db) {
   return res.json();
 }
 
-// ── Save to Drive (overwrite only) ────────────────────────
+// ── Save to Drive ─────────────────────────────────────────
+// Serialize saves from this tab so a manual click and auto-save cannot race.
+let _savePromise = null;
 async function driveSave() {
+  if (_savePromise) return _savePromise;
+  _savePromise = performDriveSave();
+  try { return await _savePromise; }
+  finally { _savePromise = null; }
+}
+
+async function performDriveSave() {
   if (!_accessToken) { showStatus('⚠️ Not signed in', 'var(--yellow)'); return false; }
   if (_driveLoadFailed) {
     showStatus('⚠️ Save blocked: reload Drive data first', 'var(--red)');
@@ -355,18 +375,25 @@ async function driveSave() {
   try {
     showStatus('⏳ Saving to Google Drive…');
     const folderId = await ensureFolder();
-    const payload = { ..._db, schema_version: DB_SCHEMA_VERSION, saved_at: new Date().toISOString() };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    let mergedConflict = false;
 
     if (_fileId) {
       const metadata = await getDriveFileMetadata();
       if (_loadedDriveVersion && String(metadata?.version || '') !== _loadedDriveVersion) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
-        await uploadDriveSnapshot(`conflict_local_${ts}.json`, payload);
-        showStatus('⚠️ Save blocked: Drive has a newer version', 'var(--red)');
-        alert('This Drive file changed after this tab loaded it. Your local changes were preserved in a conflict_local backup. Refresh from Drive before editing again.');
-        return false;
+        showStatus('⏳ Merging newer Drive changes…');
+        const remoteRes = await driveFetch(`https://www.googleapis.com/drive/v3/files/${_fileId}?alt=media`);
+        if (!remoteRes.ok) throw new Error('Conflict download failed ' + remoteRes.status);
+        const remoteDb = normalizeDb(await remoteRes.json());
+        await uploadDriveSnapshot(`conflict_local_${ts}.json`, _db);
+        await uploadDriveSnapshot(`conflict_remote_${ts}.json`, remoteDb);
+        _db = normalizeDb(FinanceCore.mergeDatabases(_baseDb, _db, remoteDb, DB_SCHEMA_VERSION));
+        _loadedDriveVersion = String(metadata?.version || '');
+        _loadedDriveModifiedTime = metadata?.modifiedTime || null;
+        mergedConflict = true;
       }
+      const payload = { ..._db, schema_version: DB_SCHEMA_VERSION, saved_at: new Date().toISOString() };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const res = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${_fileId}?uploadType=media&fields=id,version,modifiedTime`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -377,6 +404,8 @@ async function driveSave() {
       _loadedDriveVersion = String(updated.version || '');
       _loadedDriveModifiedTime = updated.modifiedTime || null;
     } else {
+      const payload = { ..._db, schema_version: DB_SCHEMA_VERSION, saved_at: new Date().toISOString() };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const form = new FormData();
       form.append('metadata', new Blob([JSON.stringify({ name: DATA_FILENAME, parents: [folderId] })], { type: 'application/json' }));
       form.append('file', blob);
@@ -390,7 +419,10 @@ async function driveSave() {
       _loadedDriveModifiedTime = created.modifiedTime || null;
       sessionStorage.setItem(SS_FILE, _fileId);
     }
-    _unsavedChanges = false; _lastSaveTime = Date.now(); showStatus(`✅ Saved to Google Drive — ${new Date().toLocaleTimeString()}`, 'var(--green)');
+    _baseDb = cloneDb(_db);
+    _unsavedChanges = false;
+    _lastSaveTime = Date.now();
+    showStatus(`${mergedConflict ? '✅ Merged and saved' : '✅ Saved to Google Drive'} — ${new Date().toLocaleTimeString()}`, 'var(--green)');
     return true;
   } catch(e) {
     console.error('driveSave:', e);
