@@ -210,6 +210,86 @@ function triggerRender() {
   const overlay = document.getElementById('loadingOverlay');
   if (overlay) { overlay.style.opacity='0'; setTimeout(()=>overlay.style.display='none',300); }
   if (typeof window.onDataLoaded === 'function') window.onDataLoaded();
+  requestAnimationFrame(ensureActiveTableScroller);
+}
+
+// ── Floating horizontal table controls ────────────────────
+let _activeTableWrap = null;
+let _tableScrollControls = null;
+let _tableScrollFrame = null;
+
+function wideVisibleTableWrap() {
+  return [...document.querySelectorAll('.tbl-wrap')].find(wrap => {
+    const rect = wrap.getBoundingClientRect();
+    return wrap.scrollWidth > wrap.clientWidth + 4 && rect.width > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+  }) || null;
+}
+
+function ensureActiveTableScroller() {
+  if (!_tableScrollControls) return;
+  const rect = _activeTableWrap?.getBoundingClientRect();
+  if (!_activeTableWrap || !_activeTableWrap.isConnected || !rect?.width) _activeTableWrap = wideVisibleTableWrap();
+  updateFloatingTableScroll();
+}
+
+function scheduleFloatingTableScrollUpdate() {
+  if (_tableScrollFrame) return;
+  _tableScrollFrame = requestAnimationFrame(() => {
+    _tableScrollFrame = null;
+    updateFloatingTableScroll();
+  });
+}
+
+function updateFloatingTableScroll() {
+  if (!_tableScrollControls || !_activeTableWrap) return;
+  const wrap = _activeTableWrap;
+  const rect = wrap.getBoundingClientRect();
+  const overflow = wrap.scrollWidth > wrap.clientWidth + 4;
+  const visible = rect.width > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+  _tableScrollControls.classList.toggle('visible', overflow && visible);
+  if (!overflow || !visible) return;
+
+  const visibleTop = Math.max(rect.top, 64);
+  const visibleBottom = Math.min(rect.bottom, window.innerHeight - 16);
+  const y = Math.max(72, Math.min(window.innerHeight - 48, (visibleTop + visibleBottom) / 2));
+  const leftX = Math.max(10, rect.left + 10);
+  const rightX = Math.min(window.innerWidth - 52, rect.right - 52);
+  _tableScrollControls.style.setProperty('--table-scroll-y', `${y}px`);
+  _tableScrollControls.querySelector('[data-table-scroll="left"]').style.left = `${leftX}px`;
+  _tableScrollControls.querySelector('[data-table-scroll="right"]').style.left = `${rightX}px`;
+  _tableScrollControls.querySelector('[data-table-scroll="left"]').disabled = wrap.scrollLeft <= 2;
+  _tableScrollControls.querySelector('[data-table-scroll="right"]').disabled = wrap.scrollLeft + wrap.clientWidth >= wrap.scrollWidth - 2;
+}
+
+function initFloatingTableScroll() {
+  if (_tableScrollControls) return;
+  const controls = document.createElement('div');
+  controls.className = 'floating-table-scroll';
+  controls.setAttribute('aria-hidden', 'false');
+  controls.innerHTML = `
+    <button type="button" class="table-scroll-arrow" data-table-scroll="left" aria-label="Scroll table left" title="Scroll table left">←</button>
+    <button type="button" class="table-scroll-arrow" data-table-scroll="right" aria-label="Scroll table right" title="Scroll table right">→</button>`;
+  document.body.appendChild(controls);
+  _tableScrollControls = controls;
+
+  controls.addEventListener('click', event => {
+    const button = event.target.closest('[data-table-scroll]');
+    if (!button || !_activeTableWrap) return;
+    const direction = button.dataset.tableScroll === 'left' ? -1 : 1;
+    _activeTableWrap.scrollBy({ left: direction * Math.max(280, _activeTableWrap.clientWidth * 0.78), behavior: 'smooth' });
+  });
+  document.addEventListener('pointerover', event => {
+    const wrap = event.target.closest?.('.tbl-wrap');
+    if (wrap && wrap !== _activeTableWrap) { _activeTableWrap = wrap; updateFloatingTableScroll(); }
+  });
+  document.addEventListener('focusin', event => {
+    const wrap = event.target.closest?.('.tbl-wrap');
+    if (wrap) { _activeTableWrap = wrap; updateFloatingTableScroll(); }
+  });
+  document.addEventListener('click', () => requestAnimationFrame(ensureActiveTableScroller));
+  document.addEventListener('scroll', scheduleFloatingTableScrollUpdate, true);
+  window.addEventListener('resize', scheduleFloatingTableScrollUpdate);
+  requestAnimationFrame(ensureActiveTableScroller);
 }
 
 // ── Drive helpers ─────────────────────────────────────────
@@ -728,6 +808,7 @@ window.addEventListener('beforeunload', (e) => {
 
 // ── Boot ──────────────────────────────────────────────────
 window.addEventListener('load', async () => {
+  initFloatingTableScroll();
   updateAuthUI(false);
   await initGoogleAuth();
 });
