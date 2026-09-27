@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>My Finance App — Stock Compare</title>
+<title>Stock Analysis - Trend Comparison</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="js/finance-core.js"></script>
+<script src="js/stock-core.js"></script>
 <script src="js/store.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
@@ -24,16 +24,12 @@
 <div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading your data from Google Drive…</div></div>
 
 <nav class="nav">
-  <a class="nav-brand" href="index.html">💰 MyFinance</a>
+  <a class="nav-brand" href="stocks.html">Stock Analysis</a>
   <div class="nav-links">
-    <a href="index.html" class="">Dashboard</a>
-    <a href="input.html" class="">Finance Input</a>
-    <a href="input.html?section=investments" class="">Investments</a>
-    <a href="stocks.html" class="">Portfolio</a>
-    <a href="stock_tracker.html" class="">Watchlists</a>
-    <a href="stock_compare.html" class="active">Compare</a>
-    <a href="planning.html" class="">Plan</a>
-    <a href="assets.html" class="">Assets</a>
+    <a href="stocks.html">Portfolio Trackers</a>
+    <a href="stock_tracker.html?mode=stocks">Stock Watchlists</a>
+    <a href="stock_tracker.html?mode=funds">ETF &amp; Index Watch List</a>
+    <a href="stock_compare.html" class="active">Trend Comparison</a>
   </div>
   <div class="nav-right">
     <span id="driveStatus" class="drive-status-text"></span>
@@ -52,7 +48,7 @@
 </nav>
 
 <div class="page">
-  <div class="page-title">📊 Stock Compare</div>
+  <div class="page-title">Trend Comparison</div>
 
   <div class="flex flex-gap flex-center mb-16 flex-wrap">
     <div class="form-group">

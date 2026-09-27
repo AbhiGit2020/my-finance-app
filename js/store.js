@@ -8,14 +8,14 @@ const GOOGLE_SCOPES    = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_FOLDER     = 'MyFinanceApp';
 const DATA_FILENAME    = 'data.json';
 const DB_SCHEMA_VERSION = 1;
-const DATA_COLLECTION_KEYS = FinanceCore.DATA_COLLECTION_KEYS;
+const DATA_COLLECTION_KEYS = StockCore.DATA_COLLECTION_KEYS;
 
 const SS_TOKEN  = 'hf_gtoken';
 const SS_EXPIRY = 'hf_gtoken_exp';
 const SS_FOLDER = 'hf_gfolder';
 const SS_FILE   = 'hf_gfile';
 const SS_FINNHUB = 'hf_finnhub_key';
-const STOCK_FX_TO_SGD = FinanceCore.DEFAULT_FX_TO_SGD;
+const STOCK_FX_TO_SGD = StockCore.DEFAULT_FX_TO_SGD;
 
 // ── Finnhub API key (kept out of source — stored locally only) ──
 function getFinnhubKey() {
@@ -42,20 +42,13 @@ let _baseDb = emptyDb();
 function emptyDb() {
   return {
     schema_version: DB_SCHEMA_VERSION,
-    finance_records:[], finance_categories:[], useless_expenses:[],
     stock_transactions:[], stock_prices:[], stock_watchlists:[],
-    stock_tracker_symbols:[], stock_tracker_prices:[], assets_master:[],
-    asset_values:[], investment_data:[], fx_rates:[], budget_targets:[],
-    recurring_transactions:[], planning_settings:[],
+    stock_tracker_symbols:[], stock_tracker_prices:[], fx_rates:[],
   };
 }
 
 function normalizeDb(data) {
-  const normalized = { ...emptyDb(), ...FinanceCore.normalizeDatabase(data, DB_SCHEMA_VERSION) };
-  normalized.assets_master = normalized.assets_master.map(asset =>
-    asset && asset.owner === 'Kid' ? { ...asset, owner: 'Kids' } : asset
-  );
-  return normalized;
+  return { ...emptyDb(), ...StockCore.normalizeDatabase(data, DB_SCHEMA_VERSION) };
 }
 
 function cloneDb(data) {
@@ -175,9 +168,8 @@ function initGoogleAuth() {
       loadFromDrive().then(() => resolve(true));
     } else {
       updateAuthUI(false);
-      // Not signed in — render with empty/seed data
+      // Not signed in — render an empty stock workspace.
       _db = emptyDb();
-      _db.finance_categories = seedCategories(2024);
       _baseDb = cloneDb(_db);
       _dataReady = true;
       triggerRender();
@@ -196,7 +188,6 @@ function signOut() {
   _accessToken = null; _signedIn = false; _folderId = null; _fileId = null;
   clearSession();
   _db = emptyDb();
-  _db.finance_categories = seedCategories(2024);
   _baseDb = cloneDb(_db);
   _loadedDriveVersion = null;
   _loadedDriveModifiedTime = null;
@@ -384,7 +375,6 @@ async function loadFromDrive() {
       _driveLoadFailed = false;
       showStatus('New file — save to create.', 'var(--text-muted)');
       _db = emptyDb();
-      _db.finance_categories = seedCategories(2024);
       _baseDb = cloneDb(_db);
       _dataReady = true;
       triggerRender();
@@ -467,7 +457,7 @@ async function performDriveSave() {
         const remoteDb = normalizeDb(await remoteRes.json());
         await uploadDriveSnapshot(`conflict_local_${ts}.json`, _db);
         await uploadDriveSnapshot(`conflict_remote_${ts}.json`, remoteDb);
-        _db = normalizeDb(FinanceCore.mergeDatabases(_baseDb, _db, remoteDb, DB_SCHEMA_VERSION));
+        _db = normalizeDb(StockCore.mergeDatabases(_baseDb, _db, remoteDb, DB_SCHEMA_VERSION));
         _loadedDriveVersion = String(metadata?.version || '');
         _loadedDriveModifiedTime = metadata?.modifiedTime || null;
         mergedConflict = true;
@@ -550,113 +540,45 @@ async function driveSync(makeBackup = false) {
 }
 
 // ── Public accessors ──────────────────────────────────────
-function loadFinanceRecords()    { return _db.finance_records    || []; }
-function loadCategories()        { return (_db.finance_categories && _db.finance_categories.length) ? _db.finance_categories : seedCategories(2024); }
-function loadUselessExpenses()   { return _db.useless_expenses   || []; }
 function loadStockTransactions() { return _db.stock_transactions || []; }
 function loadStockPrices()       { return _db.stock_prices       || []; }
 function loadStockWatchlists()   { return _db.stock_watchlists   || []; }
 function loadStockTrackerSymbols() { return _db.stock_tracker_symbols || []; }
 function loadStockTrackerPrices()  { return _db.stock_tracker_prices  || []; }
-function loadAssetsMaster()      { return _db.assets_master      || []; }
-function loadAssetValues()       { return _db.asset_values       || []; }
-function loadInvestmentData()    { return _db.investment_data    || []; }
 function loadFxRates()           { return _db.fx_rates           || []; }
-function loadBudgetTargets()     { return _db.budget_targets     || []; }
-function loadRecurringTransactions() { return _db.recurring_transactions || []; }
-function loadPlanningSettings()  { return _db.planning_settings  || []; }
 
-function saveFinanceRecords(arr)    { _db.finance_records    = arr; markUnsaved(); }
-function recordProfile(row) { return row && row.profile ? row.profile : 'Abhi'; }
-function getProfileRecords(profile = getActiveProfile()) {
-  return (_db.finance_records||[]).filter(r => recordProfile(r) === profile);
-}
-function saveCategories(arr)        { _db.finance_categories = arr; markUnsaved(); }
-function saveUselessExpenses(arr)   { _db.useless_expenses   = arr; markUnsaved(); }
 function saveStockTransactions(arr) { _db.stock_transactions = arr; markUnsaved(); }
 function saveStockPrices(arr)       { _db.stock_prices       = arr; markUnsaved(); }
 function saveStockWatchlists(arr)   { _db.stock_watchlists   = arr; markUnsaved(); }
 function saveStockTrackerSymbols(arr) { _db.stock_tracker_symbols = arr; markUnsaved(); }
 function saveStockTrackerPrices(arr)  { _db.stock_tracker_prices  = arr; markUnsaved(); }
-function saveAssetsMaster(arr)      { _db.assets_master      = arr; markUnsaved(); }
-function saveAssetValues(arr)       { _db.asset_values       = arr; markUnsaved(); }
-function saveInvestmentData(arr)    { _db.investment_data    = arr; markUnsaved(); }
 function saveFxRates(arr)            { _db.fx_rates           = arr; markUnsaved(); }
-function saveBudgetTargets(arr)      { _db.budget_targets     = arr; markUnsaved(); }
-function saveRecurringTransactions(arr) { _db.recurring_transactions = arr; markUnsaved(); }
-function savePlanningSettings(arr)   { _db.planning_settings  = arr; markUnsaved(); }
-
-// ── Withdraw a retired investment's value into a Cash / Savings asset ──
-function withdrawInvestmentToSavings(profile, sourceName, amount) {
-  if (!(amount > 0)) return;
-  const assets = loadAssetsMaster();
-  let cash = assets.find(a => a.asset_type === 'Cash / Savings' && a.owner === profile);
-  if (!cash) {
-    const now = new Date().toISOString();
-    cash = {
-      asset_id: uuid(), asset_name: `Cash / Savings (${profile})`, asset_type: 'Cash / Savings',
-      owner: profile, active: true, notes: '', created_at: now, updated_at: now,
-    };
-    assets.push(cash);
-    saveAssetsMaster(assets);
-  }
-  const vals = loadAssetValues();
-  const existing = vals.filter(v => v.asset_id === cash.asset_id).sort((a, b) => new Date(a.date) - new Date(b.date));
-  const currentVal = existing.length ? (parseFloat(existing[existing.length - 1].value_sgd) || 0) : 0;
-  const now = new Date();
-  vals.push({
-    valuation_id: uuid(), asset_id: cash.asset_id, date: now.toISOString().slice(0, 10),
-    year: now.getFullYear(), month: now.getMonth() + 1,
-    value_sgd: currentVal + amount,
-    note: `Withdrawn from retired investment: ${sourceName}`,
-    created_at: now.toISOString(), updated_at: now.toISOString(),
-  });
-  saveAssetValues(vals);
-  return cash;
-}
 
 // ── Excel export ──────────────────────────────────────────
 function exportToExcel(sheets) {
   const wb = XLSX.utils.book_new();
   sheets.forEach(s => { const ws = XLSX.utils.json_to_sheet(s.data); XLSX.utils.book_append_sheet(wb, ws, s.name); });
-  XLSX.writeFile(wb, `MyFinance_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.writeFile(wb, `StockAnalysis_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 function exportAllData() {
   exportToExcel([
-    { name:'finance_records',    data: loadFinanceRecords() },
-    { name:'finance_categories', data: loadCategories() },
-    { name:'useless_expenses',   data: loadUselessExpenses() },
     { name:'stock_transactions', data: loadStockTransactions() },
     { name:'stock_prices',       data: loadStockPrices() },
     { name:'stock_watchlists',   data: loadStockWatchlists() },
     { name:'stock_tracker_symbols', data: loadStockTrackerSymbols() },
     { name:'stock_tracker_prices',  data: loadStockTrackerPrices() },
-    { name:'assets_master',      data: loadAssetsMaster() },
-    { name:'asset_values',       data: loadAssetValues() },
-    { name:'investment_data',    data: loadInvestmentData() },
     { name:'fx_rates',           data: loadFxRates() },
-    { name:'budget_targets',     data: loadBudgetTargets() },
-    { name:'recurring_transactions', data: loadRecurringTransactions() },
-    { name:'planning_settings',  data: loadPlanningSettings() },
   ]);
 }
 function exportJsonBackup() {
   const blob = new Blob([JSON.stringify({..._db, exported_at: new Date().toISOString()}, null, 2)], { type:'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `MyFinance_Backup_${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `StockAnalysis_Backup_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
 }
-function appStockFxToSgd(currency) {
-  return FinanceCore.fxRateToSgd(currency, new Date().toISOString().slice(0, 10), loadFxRates(), STOCK_FX_TO_SGD);
-}
 function appFxToSgd(currency, date) {
-  return FinanceCore.fxRateToSgd(currency, date, loadFxRates(), STOCK_FX_TO_SGD);
-}
-function appConvertCurrency(amount, fromCurrency, toCurrency, date) {
-  const fromSgd = appFxToSgd(fromCurrency, date);
-  const toSgd = appFxToSgd(toCurrency, date);
-  return toSgd > 0 ? (FinanceCore.number(amount) * fromSgd / toSgd) : 0;
+  return StockCore.fxRateToSgd(currency, date, loadFxRates(), STOCK_FX_TO_SGD);
 }
 
 // stock_prices now accumulates a dated history per (profile,ticker) instead of
@@ -683,12 +605,11 @@ function importJsonBackup() {
         const data = JSON.parse(reader.result);
         const knownKeys = DATA_COLLECTION_KEYS;
         const hasKnownData = knownKeys.some(k => Array.isArray(data[k]));
-        if (!hasKnownData) throw new Error('This file does not look like a MyFinance backup');
+        if (!hasKnownData) throw new Error('This file does not look like a Stock Analysis backup');
         const normalized = normalizeDb(data);
         if (!confirm('Import this JSON backup into the app? Review the data, then click Save to Drive if it looks right.')) return;
         if (_signedIn && !(await driveBackup())) throw new Error('Could not back up the current Drive data before import');
         _db = normalized;
-        if (!(_db.finance_categories && _db.finance_categories.length)) _db.finance_categories = seedCategories(2024);
         _driveLoadFailed = false;
         _dataReady = true;
         markUnsaved();
@@ -696,55 +617,13 @@ function importJsonBackup() {
         triggerRender();
       } catch (e) {
         console.error('importJsonBackup:', e);
-        alert('Could not import this JSON backup. Please choose a valid MyFinance JSON file.');
+        alert('Could not import this JSON backup. Please choose a valid Stock Analysis JSON file.');
       }
     };
     reader.readAsText(file);
   };
   input.click();
 }
-function appHealthSnapshot() {
-  const db = { ...emptyDb(), ..._db };
-  const profiles = PROFILES;
-  const stockTx = db.stock_transactions || [];
-  const stockPrices = db.stock_prices || [];
-  const openHoldings = [];
-  profiles.forEach(profile => {
-    const result = FinanceCore.computeHoldings(
-      stockTx.filter(t => t.profile === profile),
-      (currency, date) => appFxToSgd(currency, date)
-    );
-    result.holdings.forEach(holding => openHoldings.push({ profile, ticker: holding.ticker }));
-  });
-  const priceKeys = new Set(stockPrices.map(p => `${p.profile || 'Abhi'}|${String(p.ticker || '').toUpperCase()}`));
-  const missingStockPrices = openHoldings.filter(h => !priceKeys.has(`${h.profile}|${h.ticker}`));
-  const tracked = (db.stock_tracker_symbols || []).filter(s => s.active !== false);
-  const trackerPrices = db.stock_tracker_prices || [];
-  const baselineKeys = new Set(trackerPrices.filter(p => p.asof_date === '2025-01-01' && parseFloat(p.close) > 0).map(p => `${p.profile || 'Abhi'}|${String(p.symbol || '').toUpperCase()}`));
-  const trackedKeys = [...new Map(tracked.map(s => [`${s.profile || 'Abhi'}|${String(s.symbol || '').toUpperCase()}`, s])).values()];
-  const missingCompareBaselines = trackedKeys.filter(s => !baselineKeys.has(`${s.profile || 'Abhi'}|${String(s.symbol || '').toUpperCase()}`));
-  return {
-    signedIn:_signedIn,
-    unsaved:_unsavedChanges,
-    driveLoadFailed:_driveLoadFailed,
-    lastSaveTime:_lastSaveTime,
-    schemaVersion:db.schema_version,
-    driveVersion:_loadedDriveVersion,
-    driveModifiedTime:_loadedDriveModifiedTime,
-    counts:{
-      finance_records:db.finance_records.length,
-      investment_data:db.investment_data.length,
-      stock_transactions:db.stock_transactions.length,
-      stock_prices:db.stock_prices.length,
-      tracked_symbols:tracked.length,
-      assets:db.assets_master.length + db.asset_values.length,
-      planning:db.budget_targets.length + db.recurring_transactions.length,
-    },
-    missingStockPrices,
-    missingCompareBaselines,
-  };
-}
-
 // ── UUID & constants ──────────────────────────────────────
 function uuid() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -752,31 +631,6 @@ function uuid() {
     const r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16);
   });
 }
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-// ── Seed categories ───────────────────────────────────────
-function seedCategories(year = 2024) {
-  const rows = [];
-  const add = (section, group, type, category, order) =>
-    rows.push({ category_id:uuid(), section, group, type, category, order, active:true, start_year:year-2, end_year:null, notes:'' });
-  add('incoming','Primary','income','Salary',1);
-  add('incoming','Primary','income','Dividends',2);
-  add('incoming','Primary','income','Reimbursements',3);
-  add('incoming','Primary','income','Others',4);
-  add('outgoing','Living','expense','Mortgage',1);
-  add('outgoing','Living','expense','Child Care / School Fees',2);
-  add('outgoing','Living','expense','Credit Card Bill - 3 SC Cash',3);
-  add('outgoing','Living','expense','Small / Daily Expenses',4);
-  add('outgoing','Living','expense','Big Ticket Purchases',5);
-  add('outgoing','Insurance','expense','Insurance - 1',1);
-  add('outgoing','Insurance','expense','Insurance - 2',2);
-  add('outgoing','Taxes','tax','Income Tax',1);
-  add('outgoing','Taxes','tax','Personal Tax',2);
-  _db.finance_categories = rows;
-  return rows;
-}
-
-
 // ── Auto-save & unsaved change tracking ──────────────────
 let _unsavedChanges = false;
 let _lastSaveTime   = Date.now();

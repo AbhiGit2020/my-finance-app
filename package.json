@@ -1,5 +1,5 @@
 {
-  "name": "my-finance-app",
+  "name": "stock-analysis-app",
   "private": true,
   "scripts": {
     "test": "node --test"

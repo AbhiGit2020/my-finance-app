@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>My Finance App — Stock Watchlists</title>
+<title>Stock Analysis - Watchlists</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="js/finance-core.js"></script>
+<script src="js/stock-core.js"></script>
 <script src="js/store.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
@@ -23,16 +23,12 @@
 <div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading your data from Google Drive…</div></div>
 
 <nav class="nav">
-  <a class="nav-brand" href="index.html">💰 MyFinance</a>
+  <a class="nav-brand" href="stocks.html">Stock Analysis</a>
   <div class="nav-links">
-    <a href="index.html" class="">Dashboard</a>
-    <a href="input.html" class="">Finance Input</a>
-    <a href="input.html?section=investments" class="">Investments</a>
-    <a href="stocks.html" class="">Portfolio</a>
-    <a href="stock_tracker.html" class="active">Watchlists</a>
-    <a href="stock_compare.html" class="">Compare</a>
-    <a href="planning.html" class="">Plan</a>
-    <a href="assets.html" class="">Assets</a>
+    <a href="stocks.html">Portfolio Trackers</a>
+    <a href="stock_tracker.html?mode=stocks" id="stockWatchNav">Stock Watchlists</a>
+    <a href="stock_tracker.html?mode=funds" id="fundWatchNav">ETF &amp; Index Watch List</a>
+    <a href="stock_compare.html">Trend Comparison</a>
   </div>
   <div class="nav-right">
     <span id="driveStatus" class="drive-status-text"></span>
@@ -51,7 +47,7 @@
 </nav>
 
 <div class="page">
-  <div class="page-title">👀 Stock Watchlists</div>
+  <div class="page-title" id="trackerPageTitle">Stock Watchlists</div>
 
   <div class="flex flex-gap flex-center mb-16 flex-wrap">
     <div class="form-group">
@@ -103,7 +99,7 @@
         </div>
         <div class="form-group">
           <label>Type</label>
-          <select id="newSymbolKind" class="input-sm"><option>Stock</option><option>Index</option><option>ETF</option><option>Crypto</option><option>Other</option></select>
+          <select id="newSymbolKind" class="input-sm"></select>
         </div>
         <div class="form-group" style="justify-content:flex-end">
           <button class="btn btn-primary" onclick="addTrackedSymbol()">Add Symbol</button>
@@ -150,20 +146,28 @@
 
 <script>
 const WATCHLIST_KEY = 'hf_tracker_watchlist';
+const TRACKER_MODE = new URLSearchParams(location.search).get('mode') === 'funds' ? 'funds' : 'stocks';
 const CHART_COLORS = ['#068a91','#3fb950','#d29922','#f85149','#a371f7','#58a6ff','#fb8500','#2dc653','#f778ba','#8ddb8c'];
 window.trackerChart = null;
 
 document.getElementById('manualDate').value = new Date().toISOString().slice(0,10);
+document.getElementById('trackerPageTitle').textContent = TRACKER_MODE === 'funds' ? 'ETF & Index Watch List' : 'Stock Watchlists';
+document.title = TRACKER_MODE === 'funds' ? 'Stock Analysis - ETF & Index Watch List' : 'Stock Analysis - Stock Watchlists';
+document.getElementById(TRACKER_MODE === 'funds' ? 'fundWatchNav' : 'stockWatchNav').classList.add('active');
+document.getElementById('newSymbolKind').innerHTML = TRACKER_MODE === 'funds' ? '<option>ETF</option><option>Index</option>' : '<option>Stock</option>';
+document.getElementById('newSymbol').placeholder = TRACKER_MODE === 'funds' ? 'SPY' : 'AAPL';
+document.getElementById('manualSymbol').placeholder = TRACKER_MODE === 'funds' ? 'SPY' : 'AAPL';
 
 function toast(msg,type='success'){const c=document.getElementById('toastContainer');const d=document.createElement('div');d.className=`toast ${type}`;d.textContent=msg;c.appendChild(d);setTimeout(()=>d.remove(),3500);}
 function profile(){return getActiveProfile();}
 function fmt(n,dec=2){return Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:dec,maximumFractionDigits:dec});}
 function fmtPct(n){return `${n>=0?'+':''}${Number(n||0).toFixed(2)}%`;}
 function normSymbol(v){return String(v||'').trim().toUpperCase();}
-function selectedWatchlistId(){return localStorage.getItem(`${WATCHLIST_KEY}_${profile()}`) || activeWatchlists()[0]?.watchlist_id || '';}
-function setSelectedWatchlist(id){localStorage.setItem(`${WATCHLIST_KEY}_${profile()}`, id); render();}
-function activeWatchlists(){return loadStockWatchlists().filter(w=>w.profile===profile()&&w.active!==false).sort((a,b)=>a.name.localeCompare(b.name));}
-function activeSymbols(watchlistId=selectedWatchlistId()){return loadStockTrackerSymbols().filter(s=>s.profile===profile()&&s.watchlist_id===watchlistId&&s.active!==false).sort((a,b)=>a.symbol.localeCompare(b.symbol));}
+function modeMatchesSymbol(symbol){const kind=String(symbol.kind||'Stock');return TRACKER_MODE==='funds'?(kind==='ETF'||kind==='Index'):kind==='Stock';}
+function selectedWatchlistId(){return localStorage.getItem(`${WATCHLIST_KEY}_${TRACKER_MODE}_${profile()}`) || activeWatchlists()[0]?.watchlist_id || '';}
+function setSelectedWatchlist(id){localStorage.setItem(`${WATCHLIST_KEY}_${TRACKER_MODE}_${profile()}`, id); render();}
+function activeWatchlists(){return loadStockWatchlists().filter(w=>w.profile===profile()&&w.active!==false&&(!w.scope||w.scope===TRACKER_MODE)).sort((a,b)=>a.name.localeCompare(b.name));}
+function activeSymbols(watchlistId=selectedWatchlistId()){return loadStockTrackerSymbols().filter(s=>s.profile===profile()&&s.watchlist_id===watchlistId&&s.active!==false&&modeMatchesSymbol(s)).sort((a,b)=>a.symbol.localeCompare(b.symbol));}
 function symbolSnapshots(symbol){return loadStockTrackerPrices().filter(p=>p.profile===profile()&&p.symbol===symbol).sort((a,b)=>a.asof_date.localeCompare(b.asof_date)||new Date(a.fetched_at||0)-new Date(b.fetched_at||0));}
 function latestSnapshot(symbol){const rows=symbolSnapshots(symbol);return rows[rows.length-1]||null;}
 function firstSnapshot(symbol){return symbolSnapshots(symbol)[0]||null;}
@@ -184,10 +188,10 @@ function addWatchlist(){
   const notes=document.getElementById('newWatchlistNotes').value.trim();
   if(!name){toast('Watchlist name required','error');return;}
   const rows=loadStockWatchlists();
-  if(rows.find(w=>w.profile===profile()&&w.active!==false&&w.name.toLowerCase()===name.toLowerCase())){toast('Watchlist already exists','error');return;}
+  if(rows.find(w=>w.profile===profile()&&w.active!==false&&(!w.scope||w.scope===TRACKER_MODE)&&w.name.toLowerCase()===name.toLowerCase())){toast('Watchlist already exists','error');return;}
   const now=new Date().toISOString();
   const id=uuid();
-  rows.push({watchlist_id:id,profile:profile(),name,notes,active:true,created_at:now,updated_at:now});
+  rows.push({watchlist_id:id,profile:profile(),scope:TRACKER_MODE,name,notes,active:true,created_at:now,updated_at:now});
   saveStockWatchlists(rows);
   setSelectedWatchlist(id);
   document.getElementById('newWatchlistName').value='';
@@ -196,14 +200,14 @@ function addWatchlist(){
 }
 
 function createStarterWatchlists(){
-  const starters=['Indices','Tech Sector','Health','Energy'];
+  const starters=TRACKER_MODE==='funds'?['Indices','Sector ETFs','Bond ETFs','International ETFs']:['Technology','Healthcare','Energy','Dividends'];
   const rows=loadStockWatchlists();
   let firstId=selectedWatchlistId();
   starters.forEach(name=>{
-    if(rows.find(w=>w.profile===profile()&&w.name.toLowerCase()===name.toLowerCase())) return;
+    if(rows.find(w=>w.profile===profile()&&(!w.scope||w.scope===TRACKER_MODE)&&w.name.toLowerCase()===name.toLowerCase())) return;
     const id=uuid();
     if(!firstId) firstId=id;
-    rows.push({watchlist_id:id,profile:profile(),name,notes:'',active:true,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+    rows.push({watchlist_id:id,profile:profile(),scope:TRACKER_MODE,name,notes:'',active:true,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
   });
   saveStockWatchlists(rows);
   if(firstId) setSelectedWatchlist(firstId);
@@ -219,7 +223,7 @@ async function retireSelectedWatchlist(){
   const found=rows.find(w=>w.watchlist_id===id&&w.profile===profile());
   if(found){found.active=false;found.updated_at=new Date().toISOString();saveStockWatchlists(rows);}
   const next=activeWatchlists().find(w=>w.watchlist_id!==id);
-  localStorage.setItem(`${WATCHLIST_KEY}_${profile()}`, next?.watchlist_id||'');
+  localStorage.setItem(`${WATCHLIST_KEY}_${TRACKER_MODE}_${profile()}`, next?.watchlist_id||'');
   render();
   toast('Watchlist retired','info');
 }
@@ -265,7 +269,7 @@ function addManualSnapshot(){
   const watchlistId=selectedWatchlistId();
   if(watchlistId&&!activeSymbols(watchlistId).some(s=>s.symbol===symbol)){
     const rows=loadStockTrackerSymbols();
-    rows.push({symbol_id:uuid(),profile:profile(),watchlist_id:watchlistId,symbol,label:symbol,kind:'Other',active:true,added_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+    rows.push({symbol_id:uuid(),profile:profile(),watchlist_id:watchlistId,symbol,label:symbol,kind:TRACKER_MODE==='funds'?'ETF':'Stock',active:true,added_at:new Date().toISOString(),updated_at:new Date().toISOString()});
     saveStockTrackerSymbols(rows);
   }
   addSnapshot(symbol,date,close,'manual');
@@ -358,9 +362,9 @@ function renderChart(symbols){
 
 function exportTrackerExcel(){
   exportToExcel([
-    {name:'Watchlists',data:loadStockWatchlists().filter(r=>r.profile===profile())},
-    {name:'Tracked Symbols',data:loadStockTrackerSymbols().filter(r=>r.profile===profile())},
-    {name:'Tracker Prices',data:loadStockTrackerPrices().filter(r=>r.profile===profile())},
+    {name:'Watchlists',data:activeWatchlists()},
+    {name:'Tracked Symbols',data:loadStockTrackerSymbols().filter(r=>r.profile===profile()&&modeMatchesSymbol(r))},
+    {name:'Tracker Prices',data:loadStockTrackerPrices().filter(r=>r.profile===profile()&&loadStockTrackerSymbols().some(s=>s.profile===profile()&&s.symbol===r.symbol&&modeMatchesSymbol(s)))},
   ]);
 }
 
