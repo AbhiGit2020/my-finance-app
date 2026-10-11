@@ -8,7 +8,6 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="js/stock-core.js"></script>
 <script src="js/store.js"></script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 .chart-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
 .chart-title { font-size:0.88rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; }
@@ -21,7 +20,7 @@
 </style>
 </head>
 <body>
-<div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading your data from Google Drive…</div></div>
+<div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading local stock data...</div></div>
 
 <nav class="nav">
   <a class="nav-brand" href="stocks.html">Stock Analysis</a>
@@ -32,14 +31,12 @@
     <a href="stock_compare.html" class="active">Trend Comparison</a>
   </div>
   <div class="nav-right">
-    <span id="driveStatus" class="drive-status-text"></span>
-    <span id="authStatus" class="auth-badge"></span>
+    <span id="storageStatus" class="drive-status-text"></span>
     <div class="nav-btn-row">
       <select class="global-profile-sel profile-sel-nav"></select>
-      <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">🔑 Sign in</button>
-      <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">🔄</button>
-      <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
-      <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">💾</button>
+      <button class="btn btn-sm btn-ghost" onclick="reloadLocalDataSafely()" title="Reload local JSON">↻</button>
+      <button class="btn btn-sm btn-teal" onclick="localSave()" title="Save local JSON">Save</button>
+      <button class="btn btn-sm btn-ghost" onclick="localBackup()" title="Create local backup">Backup</button>
       <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
       <button class="btn btn-sm btn-ghost" onclick="exportJsonBackup()" title="Export JSON backup">⬇ JSON</button>
       <button class="btn btn-sm btn-ghost" onclick="importJsonBackup()" title="Import JSON backup">⬆ JSON</button>
@@ -135,11 +132,7 @@ function baseline(symbol){return snapshots(symbol).find(p=>p.asof_date===BASELIN
 function latest(symbol){const rows=snapshots(symbol);return rows[rows.length-1]||null;}
 
 async function fetchOneTicker(symbol){
-  const key=getFinnhubKey();
-  if(!key) throw new Error('Missing Finnhub API key');
-  const res=await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${key}`);
-  if(!res.ok) throw new Error('quote fetch failed');
-  const q=await res.json();
+  const q=await fetchLocalQuote(symbol);
   const close=parseFloat(q.c)||0;
   if(close<=0) throw new Error('no price');
   return {asof_date:new Date().toISOString().slice(0,10),close};
@@ -296,7 +289,6 @@ function exportCompareExcel(){
   ]);
 }
 
-async function refreshFromDrive(){return reloadFromDriveSafely();}
 window.onProfileChange=function(){if(window.compareChart){window.compareChart.destroy();window.compareChart=null;}};
 window.onDataLoaded=render;
 </script>

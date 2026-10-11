@@ -8,7 +8,6 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="js/stock-core.js"></script>
 <script src="js/store.js"></script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 
 <style>
 .chart-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
@@ -21,7 +20,7 @@
 </style>
 </head>
 <body>
-<div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading your data from Google Drive…</div></div>
+<div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading local stock data...</div></div>
 
 <nav class="nav">
   <a class="nav-brand" href="stocks.html">Stock Analysis</a>
@@ -32,14 +31,12 @@
     <a href="stock_compare.html">Trend Comparison</a>
   </div>
   <div class="nav-right">
-    <span id="driveStatus" class="drive-status-text"></span>
-    <span id="authStatus" class="auth-badge"></span>
+    <span id="storageStatus" class="drive-status-text"></span>
     <div class="nav-btn-row">
       <select class="global-profile-sel profile-sel-nav"></select>
-      <button id="authBtn" class="btn btn-sm btn-ghost" onclick="signIn()">🔑 Sign in</button>
-      <button class="btn btn-sm btn-ghost" onclick="refreshFromDrive()" title="Refresh from Drive">🔄</button>
-      <button class="btn btn-sm btn-teal" onclick="driveSave()" title="Save to Drive">☁ Save</button>
-      <button class="btn btn-sm btn-ghost" onclick="driveBackup()" title="Create backup">💾</button>
+      <button class="btn btn-sm btn-ghost" onclick="reloadLocalDataSafely()" title="Reload local JSON">↻</button>
+      <button class="btn btn-sm btn-teal" onclick="localSave()" title="Save local JSON">Save</button>
+      <button class="btn btn-sm btn-ghost" onclick="localBackup()" title="Create local backup">Backup</button>
       <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
       <button class="btn btn-sm btn-ghost" onclick="exportJsonBackup()" title="Export JSON backup">⬇ JSON</button>
       <button class="btn btn-sm btn-ghost" onclick="importJsonBackup()" title="Import JSON backup">⬆ JSON</button>
@@ -186,11 +183,7 @@ function computeHoldings(txns){
 // than a single overwritten row, so weekly/monthly/YTD reference prices are
 // derived from real history instead of all being "previous close".
 async function fetchOneTicker(ticker) {
-  const key = getFinnhubKey();
-  if (!key) throw new Error('Missing Finnhub API key');
-  const quoteRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${key}`);
-  if (!quoteRes.ok) throw new Error('quote fetch failed');
-  const quote = await quoteRes.json();
+  const quote = await fetchLocalQuote(ticker);
   if (!quote.c) throw new Error('no price data');
   return { asof_date: new Date().toISOString().slice(0, 10), close: quote.c };
 }
@@ -700,12 +693,6 @@ function renderStockPerformance(data) {
   html += '</tbody></table></div>';
   document.getElementById('stockPerformance').innerHTML = html;
 }
-
-// ── Refresh from Drive ────────────────────────────────────
-async function refreshFromDrive() {
-  return reloadFromDriveSafely();
-}
-
 
 // ── Profile change handler ────────────────────────────────
 window.onProfileChange = function() {
