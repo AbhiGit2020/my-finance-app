@@ -15,10 +15,12 @@
     AUD: 0.91,
   });
   const DATA_COLLECTION_KEYS = Object.freeze([
+    'portfolio_accounts',
     'stock_transactions', 'stock_prices', 'stock_watchlists',
     'stock_tracker_symbols', 'stock_tracker_prices', 'fx_rates',
   ]);
   const COLLECTION_ID_FIELDS = Object.freeze({
+    portfolio_accounts: ['account_id'],
     stock_transactions: ['txn_id'],
     stock_prices: ['profile', 'ticker', 'asof_date'],
     stock_watchlists: ['watchlist_id'],

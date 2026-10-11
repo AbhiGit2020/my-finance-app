@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Stock Analysis - Portfolio Trackers</title>
+<title>Stock Analysis - My Portfolios</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -25,10 +25,9 @@
 <nav class="nav">
   <a class="nav-brand" href="stocks.html">Stock Analysis</a>
   <div class="nav-links">
-    <a href="stocks.html" class="active">Portfolio Trackers</a>
-    <a href="stock_tracker.html?mode=stocks">Stock Watchlists</a>
-    <a href="stock_tracker.html?mode=funds">ETF &amp; Index Watch List</a>
+    <a href="stocks.html" class="active">My Portfolios</a>
     <a href="stock_compare.html">Trend Comparison</a>
+    <a href="stock_tracker.html">Watch Lists</a>
   </div>
   <div class="nav-right">
     <span id="storageStatus" class="drive-status-text"></span>
@@ -45,7 +44,7 @@
 </nav>
 
 <div class="page">
-  <div class="page-title">Portfolio Trackers</div>
+  <div class="page-title">My Portfolios</div>
 
   <!-- Profile selector -->
   <div class="flex flex-gap flex-center mb-16 flex-wrap">
@@ -55,6 +54,32 @@
       <button class="btn btn-secondary" onclick="exportStocksExcel()">⬇ Export Excel</button>
     </div>
   </div>
+
+  <details>
+    <summary>Manage Portfolio Accounts</summary>
+    <div class="details-content">
+      <div class="form-row">
+        <div class="form-group">
+          <label>New Account</label>
+          <input type="text" id="newPortfolioName" class="input-md" placeholder="Family Portfolio">
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="addPortfolioAccount()">Add Account</button>
+        </div>
+        <div class="form-group">
+          <label>Rename Selected</label>
+          <input type="text" id="renamePortfolioName" class="input-md" placeholder="New name">
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-secondary" onclick="renamePortfolioAccount()">Rename</button>
+        </div>
+        <div class="form-group" style="justify-content:flex-end">
+          <button class="btn btn-danger" onclick="retirePortfolioAccount()">Retire Selected</button>
+        </div>
+      </div>
+      <div id="portfolioAccountList" class="text-muted"></div>
+    </div>
+  </details>
 
   <!-- Portfolio Summary KPIs -->
   <div class="kpi-grid" id="stockKPIs"></div>
@@ -172,6 +197,66 @@ function fmtN(n){ return fmt(n,0); }
 function pct(a,b){ if(!b) return 0; return (a-b)/b*100; }
 
 function profile(){ return getActiveProfile(); }
+
+function renderPortfolioAccounts(){
+  const accounts=loadPortfolioAccounts().filter(account=>account.active!==false);
+  document.getElementById('portfolioAccountList').textContent=accounts.map(account=>account.name).join(' | ');
+}
+
+function addPortfolioAccount(){
+  const input=document.getElementById('newPortfolioName');
+  const name=input.value.trim();
+  if(!name){toast('Account name is required','error');return;}
+  const accounts=loadPortfolioAccounts();
+  if(accounts.some(account=>account.active!==false&&account.name.toLowerCase()===name.toLowerCase())){toast('That account already exists','error');return;}
+  accounts.push({account_id:uuid(),name,active:true,created_at:new Date().toISOString()});
+  savePortfolioAccounts(accounts);
+  input.value='';
+  setActiveProfile(name);
+  renderPortfolioAccounts();
+  toast(`Portfolio added: ${name}`);
+}
+
+function replacePortfolioName(rows,oldName,newName){
+  return rows.map(row=>row.profile===oldName?{...row,profile:newName}:row);
+}
+
+function renamePortfolioAccount(){
+  const oldName=profile();
+  const input=document.getElementById('renamePortfolioName');
+  const newName=input.value.trim();
+  if(!newName||newName===oldName){toast('Enter a different account name','error');return;}
+  const accounts=loadPortfolioAccounts();
+  if(accounts.some(account=>account.active!==false&&account.name.toLowerCase()===newName.toLowerCase())){toast('That account already exists','error');return;}
+  const account=accounts.find(row=>row.name===oldName&&row.active!==false);
+  if(!account){toast('Portfolio account not found','error');return;}
+  account.name=newName;
+  account.updated_at=new Date().toISOString();
+  savePortfolioAccounts(accounts);
+  saveStockTransactions(replacePortfolioName(loadStockTransactions(),oldName,newName));
+  saveStockPrices(replacePortfolioName(loadStockPrices(),oldName,newName));
+  saveStockWatchlists(replacePortfolioName(loadStockWatchlists(),oldName,newName));
+  saveStockTrackerSymbols(replacePortfolioName(loadStockTrackerSymbols(),oldName,newName));
+  saveStockTrackerPrices(replacePortfolioName(loadStockTrackerPrices(),oldName,newName));
+  input.value='';
+  setActiveProfile(newName);
+  renderPortfolioAccounts();
+  toast('Portfolio renamed');
+}
+
+async function retirePortfolioAccount(){
+  const active=loadPortfolioAccounts().filter(account=>account.active!==false);
+  if(active.length<=1){toast('Keep at least one portfolio account','error');return;}
+  const name=profile();
+  if(!confirm(`Retire ${name}? Its transactions will be preserved.`)) return;
+  if(!(await backupBeforeDestructiveAction('retire the portfolio account'))) return;
+  const accounts=loadPortfolioAccounts();
+  const account=accounts.find(row=>row.name===name&&row.active!==false);
+  if(account){account.active=false;account.updated_at=new Date().toISOString();savePortfolioAccounts(accounts);}
+  setActiveProfile(accounts.find(row=>row.active!==false)?.name||'My Portfolio');
+  renderPortfolioAccounts();
+  toast('Portfolio retired','info');
+}
 
 // ── Holdings computation ──────────────────────────────────
 function computeHoldings(txns){
@@ -708,7 +793,7 @@ window.onProfileChange = function() {
   if(cl) { cl.style.display='block'; cl.textContent='Click "📈 Fetch Prices" first, then the chart will appear here.'; }
 };
 
-window.onDataLoaded = function() { render(); buildPortfolioChart(); };
+window.onDataLoaded = function() { renderPortfolioAccounts(); render(); buildPortfolioChart(); };
 </script>
 </body>
 </html>

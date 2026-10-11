@@ -12,6 +12,10 @@ const TEMP_FILE = path.join(DATA_DIR, 'data.json.tmp');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const SAMPLE_FILE = path.join(DATA_DIR, 'sample.json');
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
+const COLLECTIONS = [
+  'portfolio_accounts', 'stock_transactions', 'stock_prices', 'stock_watchlists',
+  'stock_tracker_symbols', 'stock_tracker_prices', 'fx_rates',
+];
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -32,6 +36,7 @@ async function ensureDataFile() {
     } catch {
       const initial = {
         schema_version: 1,
+        portfolio_accounts: [],
         stock_transactions: [], stock_prices: [], stock_watchlists: [],
         stock_tracker_symbols: [], stock_tracker_prices: [], fx_rates: [],
       };
@@ -50,6 +55,15 @@ function sendJson(res, status, value) {
   res.end(body);
 }
 
+function normalizeData(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Data must be a JSON object');
+  const normalized = { ...data, schema_version: 1 };
+  COLLECTIONS.forEach(collection => {
+    normalized[collection] = Array.isArray(data[collection]) ? data[collection] : [];
+  });
+  return normalized;
+}
+
 async function readBody(req) {
   const chunks = [];
   let size = 0;
@@ -66,10 +80,9 @@ function timestamp() {
 }
 
 async function saveData(data) {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Data must be a JSON object');
   await ensureDataFile();
   await fs.copyFile(DATA_FILE, path.join(BACKUP_DIR, 'latest-before-save.json'));
-  const payload = { ...data, schema_version: 1, saved_at: new Date().toISOString() };
+  const payload = { ...normalizeData(data), saved_at: new Date().toISOString() };
   await fs.writeFile(TEMP_FILE, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
   await fs.rename(TEMP_FILE, DATA_FILE);
   return payload.saved_at;
@@ -116,7 +129,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/api/data') {
       await ensureDataFile();
-      return sendJson(res, 200, JSON.parse(await fs.readFile(DATA_FILE, 'utf8')));
+      return sendJson(res, 200, normalizeData(JSON.parse(await fs.readFile(DATA_FILE, 'utf8'))));
     }
     if (req.method === 'PUT' && url.pathname === '/api/data') {
       const savedAt = await saveData(JSON.parse(await readBody(req)));

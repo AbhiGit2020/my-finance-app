@@ -4,7 +4,6 @@ const DB_SCHEMA_VERSION = 1;
 const DATA_COLLECTION_KEYS = StockCore.DATA_COLLECTION_KEYS;
 const STOCK_FX_TO_SGD = StockCore.DEFAULT_FX_TO_SGD;
 const SS_FINNHUB = 'hf_finnhub_key';
-const PROFILES = ['Abhi', 'Wife', 'Joint', 'Kids'];
 const PROFILE_KEY = 'hf_active_profile';
 
 let _db = emptyDb();
@@ -18,6 +17,7 @@ let _autoSaveTimer = null;
 function emptyDb() {
   return {
     schema_version: DB_SCHEMA_VERSION,
+    portfolio_accounts: [],
     stock_transactions: [],
     stock_prices: [],
     stock_watchlists: [],
@@ -28,11 +28,30 @@ function emptyDb() {
 }
 
 function normalizeDb(data) {
-  return { ...emptyDb(), ...StockCore.normalizeDatabase(data, DB_SCHEMA_VERSION) };
+  const normalized = { ...emptyDb(), ...StockCore.normalizeDatabase(data, DB_SCHEMA_VERSION) };
+  const accountNames = new Set((normalized.portfolio_accounts || []).map(account => account.name).filter(Boolean));
+  ['stock_transactions', 'stock_prices', 'stock_watchlists', 'stock_tracker_symbols', 'stock_tracker_prices'].forEach(collection => {
+    (normalized[collection] || []).forEach(row => { if (row.profile) accountNames.add(row.profile); });
+  });
+  if (!accountNames.size) accountNames.add('My Portfolio');
+  const existingByName = new Map((normalized.portfolio_accounts || []).map(account => [account.name, account]));
+  normalized.portfolio_accounts = [...accountNames].map(name => existingByName.get(name) || {
+    account_id: `account-${slugId(name)}`,
+    name,
+    active: true,
+    created_at: new Date().toISOString(),
+  });
+  return normalized;
+}
+
+function slugId(value) {
+  return String(value || 'portfolio').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'portfolio';
 }
 
 function getActiveProfile() {
-  return localStorage.getItem(PROFILE_KEY) || 'Abhi';
+  const accounts = loadPortfolioAccounts().filter(account => account.active !== false);
+  const saved = localStorage.getItem(PROFILE_KEY);
+  return accounts.some(account => account.name === saved) ? saved : (accounts[0]?.name || 'My Portfolio');
 }
 
 function setActiveProfile(name) {
@@ -44,9 +63,10 @@ function setActiveProfile(name) {
 
 function initProfileSelector() {
   const active = getActiveProfile();
+  const accounts = loadPortfolioAccounts().filter(account => account.active !== false);
   document.querySelectorAll('.global-profile-sel').forEach(select => {
-    select.innerHTML = PROFILES.map(profile =>
-      `<option value="${profile}" ${profile === active ? 'selected' : ''}>${profile}</option>`
+    select.innerHTML = accounts.map(account =>
+      `<option value="${escapeAttr(account.name)}" ${account.name === active ? 'selected' : ''}>${escapeHtml(account.name)}</option>`
     ).join('');
     select.value = active;
     select.onchange = () => setActiveProfile(select.value);
@@ -194,6 +214,7 @@ async function fetchLocalQuote(symbol) {
 }
 
 function loadStockTransactions() { return _db.stock_transactions || []; }
+function loadPortfolioAccounts() { return _db.portfolio_accounts || []; }
 function loadStockPrices() { return _db.stock_prices || []; }
 function loadStockWatchlists() { return _db.stock_watchlists || []; }
 function loadStockTrackerSymbols() { return _db.stock_tracker_symbols || []; }
@@ -201,6 +222,7 @@ function loadStockTrackerPrices() { return _db.stock_tracker_prices || []; }
 function loadFxRates() { return _db.fx_rates || []; }
 
 function saveStockTransactions(rows) { _db.stock_transactions = rows; markUnsaved(); }
+function savePortfolioAccounts(rows) { _db.portfolio_accounts = rows; markUnsaved(); }
 function saveStockPrices(rows) { _db.stock_prices = rows; markUnsaved(); }
 function saveStockWatchlists(rows) { _db.stock_watchlists = rows; markUnsaved(); }
 function saveStockTrackerSymbols(rows) { _db.stock_tracker_symbols = rows; markUnsaved(); }
@@ -217,6 +239,7 @@ function exportToExcel(sheets) {
 
 function exportAllData() {
   exportToExcel([
+    { name: 'portfolio_accounts', data: loadPortfolioAccounts() },
     { name: 'stock_transactions', data: loadStockTransactions() },
     { name: 'stock_prices', data: loadStockPrices() },
     { name: 'stock_watchlists', data: loadStockWatchlists() },

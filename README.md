@@ -2,6 +2,12 @@
 
 This branch runs the stock-analysis app locally and stores private data in a JSON file.
 
+The application has three workspaces:
+
+- **My Portfolios** - separate accounts for the user and family members, holdings, transactions, and price movement.
+- **Trend Comparison** - portfolio accounts and individual holdings compared with S&P 500, Gold, Nasdaq 100, and other benchmarks.
+- **Watch Lists** - stocks, ETFs, and indexes being monitored outside current holdings.
+
 ## Start
 
 Requirements: Node.js 18 or newer.

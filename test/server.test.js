@@ -34,6 +34,7 @@ test('local server loads, saves, and backs up JSON data', async t => {
   assert.equal(response.status, 200);
   const data = await response.json();
   assert.deepEqual(data.stock_transactions, []);
+  assert.deepEqual(data.portfolio_accounts, []);
 
   data.stock_transactions.push({ txn_id: 'test-1', ticker: 'TEST' });
   response = await fetch(`${baseUrl}/api/data`, {

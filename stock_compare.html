@@ -11,12 +11,11 @@
 <style>
 .chart-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
 .chart-title { font-size:0.88rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; }
-.chart-wrap { position:relative; height:340px; }
-.pick-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; }
-.pick-item { background:var(--bg3); border:1px solid var(--border); border-radius:8px; padding:9px 11px; display:flex; gap:8px; align-items:flex-start; }
-.pick-item input { margin-top:2px; }
-.pick-symbol { font-weight:700; font-family:'IBM Plex Mono',monospace; }
-.pick-meta { color:var(--text-muted); font-size:0.76rem; margin-top:2px; }
+.chart-wrap { position:relative; height:360px; }
+.chart-loading { text-align:center; padding:44px; color:var(--text-muted); font-size:0.88rem; }
+.movement-up { color:var(--green); font-weight:700; }
+.movement-down { color:var(--red); font-weight:700; }
+.movement-flat { color:var(--text-muted); }
 </style>
 </head>
 <body>
@@ -25,10 +24,9 @@
 <nav class="nav">
   <a class="nav-brand" href="stocks.html">Stock Analysis</a>
   <div class="nav-links">
-    <a href="stocks.html">Portfolio Trackers</a>
-    <a href="stock_tracker.html?mode=stocks">Stock Watchlists</a>
-    <a href="stock_tracker.html?mode=funds">ETF &amp; Index Watch List</a>
+    <a href="stocks.html">My Portfolios</a>
     <a href="stock_compare.html" class="active">Trend Comparison</a>
+    <a href="stock_tracker.html">Watch Lists</a>
   </div>
   <div class="nav-right">
     <span id="storageStatus" class="drive-status-text"></span>
@@ -37,259 +35,333 @@
       <button class="btn btn-sm btn-ghost" onclick="reloadLocalDataSafely()" title="Reload local JSON">↻</button>
       <button class="btn btn-sm btn-teal" onclick="localSave()" title="Save local JSON">Save</button>
       <button class="btn btn-sm btn-ghost" onclick="localBackup()" title="Create local backup">Backup</button>
-      <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
-      <button class="btn btn-sm btn-ghost" onclick="exportJsonBackup()" title="Export JSON backup">⬇ JSON</button>
-      <button class="btn btn-sm btn-ghost" onclick="importJsonBackup()" title="Import JSON backup">⬆ JSON</button>
+      <button class="btn btn-sm btn-ghost" onclick="exportTrendExcel()" title="Export analysis">Export</button>
     </div>
   </div>
 </nav>
 
-<div class="page">
+<main class="page">
   <div class="page-title">Trend Comparison</div>
 
-  <div class="flex flex-gap flex-center mb-16 flex-wrap">
+  <div class="form-row mb-16">
     <div class="form-group">
-      <label>Watchlist Filter</label>
-      <select id="watchlistFilter" class="input-md" onchange="render()"></select>
+      <label>Period</label>
+      <select id="periodSelect" class="input-md" onchange="render()">
+        <option value="YTD">Year to Date</option>
+        <option value="1M">1 Month</option>
+        <option value="3M">3 Months</option>
+        <option value="6M">6 Months</option>
+        <option value="1Y">1 Year</option>
+        <option value="ALL">All Available</option>
+      </select>
     </div>
-    <div style="margin-left:auto;display:flex;gap:8px;align-items:flex-end">
-      <button class="btn btn-primary" id="compareFetchBtn" onclick="fetchSelectedCurrentPrices()">🔄 Fetch Current</button>
-      <button class="btn btn-secondary" onclick="exportCompareExcel()">⬇ Export Excel</button>
+    <div class="form-group">
+      <label>Benchmark</label>
+      <select id="benchmarkSelect" class="input-md" onchange="render()">
+        <option value="SPY">S&amp;P 500 (SPY)</option>
+        <option value="GLD">Gold (GLD)</option>
+        <option value="QQQ">Nasdaq 100 (QQQ)</option>
+        <option value="DIA">Dow Jones (DIA)</option>
+        <option value="IWM">Russell 2000 (IWM)</option>
+        <option value="VTI">US Total Market (VTI)</option>
+      </select>
+    </div>
+    <div class="form-group" style="justify-content:flex-end">
+      <button class="btn btn-primary" id="trendFetchBtn" onclick="fetchComparisonPrices()">Fetch Current Prices</button>
     </div>
   </div>
 
-  <details open>
-    <summary>Pick Symbols</summary>
+  <div class="kpi-grid" id="trendKpis"></div>
+
+  <section class="chart-card">
+    <div class="chart-title"><span>Overall Portfolio Performance</span><span id="chartPeriod"></span></div>
+    <div id="trendEmpty" class="chart-loading"></div>
+    <div id="trendChartWrap" class="chart-wrap" style="display:none"><canvas id="trendChart"></canvas></div>
+  </section>
+
+  <section class="mb-16">
+    <div class="section-header"><div class="section-title">Portfolio Accounts</div></div>
+    <div class="tbl-wrap"><table id="accountComparisonTable"></table></div>
+  </section>
+
+  <section class="mb-16">
+    <div class="section-header"><div class="section-title">Holdings Movement</div></div>
+    <div class="tbl-wrap"><table id="holdingComparisonTable"></table></div>
+  </section>
+
+  <details>
+    <summary>Portfolio Reference Prices</summary>
     <div class="details-content">
-      <div class="pick-grid" id="symbolPicker"></div>
+      <div class="tbl-wrap"><table id="holdingReferenceTable"></table></div>
     </div>
   </details>
 
   <details>
-    <summary>Jan 1 2025 Baseline</summary>
+    <summary>Benchmark Price Entry</summary>
     <div class="details-content">
       <div class="form-row">
-        <div class="form-group">
-          <label>Symbol</label>
-          <input type="text" id="baselineSymbol" class="input-sm" placeholder="AAPL" style="text-transform:uppercase">
-        </div>
-        <div class="form-group">
-          <label>Baseline Date</label>
-          <input type="date" id="baselineDate" class="input-md" value="2025-01-01" readonly>
-        </div>
-        <div class="form-group">
-          <label>Close</label>
-          <input type="number" id="baselineClose" class="input-md" min="0" step="0.01" value="0">
-        </div>
-        <div class="form-group" style="justify-content:flex-end">
-          <button class="btn btn-secondary" onclick="saveBaseline()">Save Baseline</button>
-        </div>
+        <div class="form-group"><label>Symbol</label><input id="benchmarkSymbol" class="input-sm" readonly></div>
+        <div class="form-group"><label>Date</label><input id="benchmarkDate" type="date" class="input-md"></div>
+        <div class="form-group"><label>Close</label><input id="benchmarkClose" type="number" min="0" step="0.01" class="input-md"></div>
+        <div class="form-group" style="justify-content:flex-end"><button class="btn btn-secondary" onclick="saveBenchmarkPrice()">Save Price</button></div>
       </div>
-      <div class="tbl-wrap" style="margin-top:12px"><table id="baselineHelperTable"></table></div>
+      <div class="tbl-wrap"><table id="benchmarkHistoryTable"></table></div>
     </div>
   </details>
-
-  <div class="chart-card">
-    <div class="chart-title"><span>% Movement Since Jan 1 2025</span><span id="compareCount"></span></div>
-    <div id="compareEmpty" class="chart-loading">Track symbols first, then select up to 10 to compare.</div>
-    <div class="chart-wrap" id="compareChartWrap" style="display:none"><canvas id="compareChart"></canvas></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Comparison Table</div>
-    <div class="tbl-wrap"><table id="compareTable"></table></div>
-  </div>
-</div>
+</main>
 
 <div class="toast-container" id="toastContainer"></div>
 
 <script>
-const COMPARE_KEY = 'hf_compare_symbols';
-const BASELINE_DATE = '2025-01-01';
-const CHART_COLORS = ['#068a91','#3fb950','#d29922','#f85149','#a371f7','#58a6ff','#fb8500','#2dc653','#f778ba','#8ddb8c'];
-window.compareChart = null;
+const CHART_COLORS=['#068a91','#d29922','#58a6ff','#3fb950','#f85149','#a371f7'];
+const BENCHMARK_PROFILE='__BENCHMARKS__';
+window.trendChart=null;
 
-function toast(msg,type='success'){const c=document.getElementById('toastContainer');const d=document.createElement('div');d.className=`toast ${type}`;d.textContent=msg;c.appendChild(d);setTimeout(()=>d.remove(),3500);}
+function toast(message,type='success'){const container=document.getElementById('toastContainer');const item=document.createElement('div');item.className=`toast ${type}`;item.textContent=message;container.appendChild(item);setTimeout(()=>item.remove(),3500);}
 function profile(){return getActiveProfile();}
-function fmt(n,dec=2){return Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:dec,maximumFractionDigits:dec});}
-function fmtPct(n){return `${n>=0?'+':''}${Number(n||0).toFixed(2)}%`;}
-function normSymbol(v){return String(v||'').trim().toUpperCase();}
-function selectedSymbols(){try{return JSON.parse(localStorage.getItem(`${COMPARE_KEY}_${profile()}`)||'[]');}catch(e){return [];}}
-function saveSelectedSymbols(arr){localStorage.setItem(`${COMPARE_KEY}_${profile()}`, JSON.stringify(arr.slice(0,10)));}
-function watchlists(){return loadStockWatchlists().filter(w=>w.profile===profile()&&w.active!==false).sort((a,b)=>a.name.localeCompare(b.name));}
-function trackedSymbols(){
-  const filter=document.getElementById('watchlistFilter')?.value||'All';
-  const rows=loadStockTrackerSymbols().filter(s=>s.profile===profile()&&s.active!==false);
-  return rows.filter(s=>filter==='All'||s.watchlist_id===filter).sort((a,b)=>a.symbol.localeCompare(b.symbol));
-}
-function uniqueTrackedSymbols(){
-  const map={};
-  trackedSymbols().forEach(s=>{if(!map[s.symbol]) map[s.symbol]=s;});
-  return Object.values(map);
-}
-function snapshots(symbol){return loadStockTrackerPrices().filter(p=>p.profile===profile()&&p.symbol===symbol).sort((a,b)=>a.asof_date.localeCompare(b.asof_date)||new Date(a.fetched_at||0)-new Date(b.fetched_at||0));}
-function baseline(symbol){return snapshots(symbol).find(p=>p.asof_date===BASELINE_DATE)||null;}
-function latest(symbol){const rows=snapshots(symbol);return rows[rows.length-1]||null;}
+function fmt(value,decimals=2){return Number(value||0).toLocaleString('en-SG',{minimumFractionDigits:decimals,maximumFractionDigits:decimals});}
+function fmtPct(value){return Number.isFinite(value)?`${value>=0?'+':''}${fmt(value,1)}%`:'—';}
+function pct(current,base){return base>0?(current-base)/base*100:NaN;}
 
-async function fetchOneTicker(symbol){
-  const q=await fetchLocalQuote(symbol);
-  const close=parseFloat(q.c)||0;
-  if(close<=0) throw new Error('no price');
-  return {asof_date:new Date().toISOString().slice(0,10),close};
+function startDate(){
+  const period=document.getElementById('periodSelect').value;
+  const now=new Date();
+  if(period==='YTD') return `${now.getFullYear()}-01-01`;
+  if(period==='ALL') return '1900-01-01';
+  const months={ '1M':1,'3M':3,'6M':6,'1Y':12 }[period]||0;
+  now.setMonth(now.getMonth()-months);
+  return now.toISOString().slice(0,10);
 }
 
-function upsertPrice(symbol,date,close,source){
-  let rows=loadStockTrackerPrices().filter(p=>!(p.profile===profile()&&p.symbol===symbol&&p.asof_date===date));
-  rows.push({price_id:uuid(),profile:profile(),symbol,asof_date:date,close,source,fetched_at:new Date().toISOString()});
-  saveStockTrackerPrices(rows);
+function benchmarkSymbol(){return document.getElementById('benchmarkSelect').value;}
+function stockSnapshots(account,ticker){return loadStockPrices().filter(row=>row.profile===account&&row.ticker===ticker&&Number(row.close)>0).sort((a,b)=>String(a.asof_date).localeCompare(String(b.asof_date)));}
+function benchmarkSnapshots(symbol=benchmarkSymbol()){
+  const legacy=loadStockTrackerPrices().filter(row=>row.profile===profile()&&row.symbol===symbol&&Number(row.close)>0);
+  const shared=loadStockTrackerPrices().filter(row=>row.profile===BENCHMARK_PROFILE&&row.symbol===symbol&&Number(row.close)>0);
+  const byDate=new Map(legacy.map(row=>[row.asof_date,row]));
+  shared.forEach(row=>byDate.set(row.asof_date,row));
+  return [...byDate.values()].sort((a,b)=>String(a.asof_date).localeCompare(String(b.asof_date)));
+}
+function latestRow(rows){return rows[rows.length-1]||null;}
+function referenceRow(rows,date){
+  if(!rows.length) return null;
+  if(date==='1900-01-01') return rows[0];
+  const target=new Date(`${date}T00:00:00Z`).getTime();
+  const nearest=rows.reduce((best,row)=>{
+    const distance=Math.abs(new Date(`${row.asof_date}T00:00:00Z`).getTime()-target);
+    return !best||distance<best.distance?{row,distance}:best;
+  },null);
+  return nearest&&nearest.distance<=14*24*3600*1000?nearest.row:null;
+}
+function rowAt(rows,date){return [...rows].reverse().find(row=>String(row.asof_date)<=date)||null;}
+
+function holdingsFor(account){
+  return StockCore.computeHoldings(loadStockTransactions().filter(row=>row.profile===account),(currency,date)=>appFxToSgd(currency,date)).holdings;
 }
 
-function toggleSymbol(symbol,checked){
-  let sel=selectedSymbols();
-  if(checked){
-    if(sel.length>=10){toast('Compare supports up to 10 symbols','error');render();return;}
-    if(!sel.includes(symbol)) sel.push(symbol);
-  } else {
-    sel=sel.filter(s=>s!==symbol);
-  }
-  saveSelectedSymbols(sel);
-  render();
-}
-
-function saveBaseline(){
-  const symbol=normSymbol(document.getElementById('baselineSymbol').value);
-  const date=BASELINE_DATE;
-  const close=parseFloat(document.getElementById('baselineClose').value)||0;
-  if(!symbol||close<=0){toast('Valid symbol and close required','error');return;}
-  upsertPrice(symbol,date,close,'baseline');
-  document.getElementById('baselineClose').value='0';
-  render();
-  toast(`Baseline saved for ${symbol}`);
-}
-
-function saveBaselineFor(symbol){
-  const input=[...document.querySelectorAll('.baseline-helper-close')].find(el=>el.dataset.symbol===symbol);
-  const close=parseFloat(input?.value)||0;
-  if(close<=0){toast(`Valid Jan 1 2025 close required for ${symbol}`,'error');return;}
-  upsertPrice(symbol,BASELINE_DATE,close,'baseline');
-  render();
-  toast(`Jan 1 2025 baseline saved for ${symbol}`);
-}
-
-async function fetchSelectedCurrentPrices(){
-  const symbols=selectedSymbols();
-  if(!symbols.length){toast('Select symbols first','error');return;}
-  const btn=document.getElementById('compareFetchBtn');
-  btn.disabled=true;btn.textContent='⏳ Fetching…';
-  let fetched=0,failed=[];
-  for(const symbol of symbols){
-    try{const q=await fetchOneTicker(symbol);upsertPrice(symbol,q.asof_date,q.close,'finnhub');fetched++;}
-    catch(e){failed.push(symbol);}
-  }
-  btn.disabled=false;btn.textContent='🔄 Fetch Current';
-  render();
-  if(failed.length) toast(`Fetched ${fetched}. Failed: ${failed.join(', ')}`,'info');
-  else toast(`Current prices updated for ${fetched} symbol(s)`);
-}
-
-function comparisonRows(){
-  return selectedSymbols().map((symbol,i)=>{
-    const b=baseline(symbol), l=latest(symbol);
-    const bp=b?parseFloat(b.close)||0:0;
-    const lp=l?parseFloat(l.close)||0:0;
-    const pct=bp>0&&lp>0?(lp-bp)/bp*100:0;
-    return {symbol,baseline:b,latest:l,baselinePrice:bp,latestPrice:lp,pct,color:CHART_COLORS[i%CHART_COLORS.length]};
+function holdingPerformance(account){
+  const since=startDate();
+  return holdingsFor(account).map(holding=>{
+    const snapshots=stockSnapshots(account,holding.ticker);
+    const baseline=referenceRow(snapshots,since);
+    const latest=latestRow(snapshots);
+    const movement=baseline&&latest?p(Number(latest.close),Number(baseline.close)):NaN;
+    const marketValue=(Number(latest?.close)||0)*holding.qty*appFxToSgd(holding.currency,latest?.asof_date);
+    return {...holding,baseline,latest,movement,marketValue};
   });
 }
 
-function chartData(rows){
-  const dates=[...new Set(rows.flatMap(r=>snapshots(r.symbol).filter(p=>p.asof_date>=BASELINE_DATE).map(p=>p.asof_date)))].sort();
-  const datasets=rows.map(r=>({
-    label:r.symbol,borderColor:r.color,backgroundColor:'transparent',borderWidth:2,tension:0.25,spanGaps:true,pointRadius:2,pointHoverRadius:5,
-    data:dates.map(d=>{
-      if(!r.baselinePrice) return null;
-      const snap=snapshots(r.symbol).filter(p=>p.asof_date<=d).pop();
-      if(!snap) return null;
-      return ((parseFloat(snap.close)||0)-r.baselinePrice)/r.baselinePrice*100;
-    })
-  }));
-  return {dates,datasets};
+function p(current,base){return base>0?(current-base)/base*100:NaN;}
+
+function portfolioPerformance(account){
+  const rows=holdingPerformance(account).filter(row=>Number.isFinite(row.movement));
+  const totalWeight=rows.reduce((sum,row)=>sum+(row.marketValue||row.cost_basis||0),0);
+  if(!rows.length||!totalWeight) return NaN;
+  return rows.reduce((sum,row)=>sum+row.movement*(row.marketValue||row.cost_basis||0),0)/totalWeight;
+}
+
+function selectedBenchmarkPerformance(){
+  const rows=benchmarkSnapshots();
+  const baseline=referenceRow(rows,startDate());
+  const latest=latestRow(rows);
+  return baseline&&latest?p(Number(latest.close),Number(baseline.close)):NaN;
+}
+
+async function fetchComparisonPrices(){
+  const button=document.getElementById('trendFetchBtn');
+  button.disabled=true;button.textContent='Fetching...';
+  const holdings=holdingsFor(profile());
+  const symbols=[...new Set([...holdings.map(row=>row.ticker),benchmarkSymbol()])];
+  let stockPrices=loadStockPrices();
+  let trackerPrices=loadStockTrackerPrices();
+  const today=new Date().toISOString().slice(0,10);
+  let fetched=0;const failed=[];
+  for(const symbol of symbols){
+    try{
+      const quote=await fetchLocalQuote(symbol);
+      const close=Number(quote.c)||0;
+      if(close<=0) throw new Error('No price');
+      if(symbol===benchmarkSymbol()){
+        trackerPrices=trackerPrices.filter(row=>!(row.profile===BENCHMARK_PROFILE&&row.symbol===symbol&&row.asof_date===today));
+        trackerPrices.push({price_id:uuid(),profile:BENCHMARK_PROFILE,symbol,asof_date:today,close,source:'finnhub',fetched_at:new Date().toISOString()});
+      }
+      if(holdings.some(row=>row.ticker===symbol)){
+        stockPrices=stockPrices.filter(row=>!(row.profile===profile()&&row.ticker===symbol&&row.asof_date===today));
+        stockPrices.push({profile:profile(),ticker:symbol,asof_date:today,close,source:'finnhub',fetched_at:new Date().toISOString()});
+      }
+      fetched++;
+    }catch(error){failed.push(symbol);}
+  }
+  saveStockPrices(stockPrices);saveStockTrackerPrices(trackerPrices);
+  button.disabled=false;button.textContent='Fetch Current Prices';
+  render();
+  if(failed.length) toast(`Fetched ${fetched}. Failed: ${failed.join(', ')}`,'info'); else toast(`Updated ${fetched} symbols`);
+}
+
+function saveBenchmarkPrice(){
+  const symbol=benchmarkSymbol();
+  const date=document.getElementById('benchmarkDate').value;
+  const close=Number(document.getElementById('benchmarkClose').value)||0;
+  if(!date||close<=0){toast('Date and a valid close are required','error');return;}
+  const rows=loadStockTrackerPrices().filter(row=>!(row.profile===BENCHMARK_PROFILE&&row.symbol===symbol&&row.asof_date===date));
+  rows.push({price_id:uuid(),profile:BENCHMARK_PROFILE,symbol,asof_date:date,close,source:'manual',fetched_at:new Date().toISOString()});
+  saveStockTrackerPrices(rows);
+  document.getElementById('benchmarkClose').value='';
+  render();toast(`${symbol} price saved`);
+}
+
+function renderKpis(){
+  const portfolio=portfolioPerformance(profile());
+  const benchmark=selectedBenchmarkPerformance();
+  const relative=Number.isFinite(portfolio)&&Number.isFinite(benchmark)?portfolio-benchmark:NaN;
+  const holdings=holdingPerformance(profile()).filter(row=>Number.isFinite(row.movement));
+  const leaders=holdings.filter(row=>row.movement>0).length;
+  const laggards=holdings.filter(row=>row.movement<0).length;
+  const kpis=[
+    ['Portfolio',fmtPct(portfolio),portfolio],
+    [benchmarkSymbol(),fmtPct(benchmark),benchmark],
+    ['Vs Benchmark',fmtPct(relative),relative],
+    ['Moving Up',String(leaders),leaders?1:0],
+    ['Moving Down',String(laggards),laggards?-1:0],
+  ];
+  document.getElementById('trendKpis').innerHTML=kpis.map(([label,value,direction])=>`<div class="kpi ${direction>0?'green':direction<0?'red':'teal'}"><div class="kpi-label">${escapeHtml(label)}</div><div class="kpi-value ${direction>0?'pos':direction<0?'neg':'neutral'}">${escapeHtml(value)}</div></div>`).join('');
+}
+
+function renderAccounts(){
+  const benchmark=selectedBenchmarkPerformance();
+  const accounts=loadPortfolioAccounts().filter(account=>account.active!==false);
+  let html='<thead><tr><th>Portfolio Account</th><th>Holdings</th><th>Period Return</th><th>Benchmark</th><th>Relative</th></tr></thead><tbody>';
+  accounts.forEach(account=>{
+    const performance=portfolioPerformance(account.name);
+    const relative=Number.isFinite(performance)&&Number.isFinite(benchmark)?performance-benchmark:NaN;
+    html+=`<tr><td class="bold">${escapeHtml(account.name)}</td><td>${holdingsFor(account.name).length}</td><td class="${performance>0?'pos':performance<0?'neg':''}">${fmtPct(performance)}</td><td>${fmtPct(benchmark)}</td><td class="${relative>0?'pos':relative<0?'neg':''}">${fmtPct(relative)}</td></tr>`;
+  });
+  if(!accounts.length) html+='<tr><td colspan="5" class="text-muted" style="text-align:center;padding:16px">No portfolio accounts.</td></tr>';
+  document.getElementById('accountComparisonTable').innerHTML=html+'</tbody>';
+}
+
+function renderHoldings(){
+  const benchmark=selectedBenchmarkPerformance();
+  const rows=holdingPerformance(profile()).sort((a,b)=>(Number.isFinite(b.movement)?b.movement:-Infinity)-(Number.isFinite(a.movement)?a.movement:-Infinity));
+  let html='<thead><tr><th>Stock</th><th>Start Price</th><th>Latest Price</th><th>Movement</th><th>Benchmark</th><th>Vs Benchmark</th><th>Direction</th></tr></thead><tbody>';
+  rows.forEach(row=>{
+    const relative=Number.isFinite(row.movement)&&Number.isFinite(benchmark)?row.movement-benchmark:NaN;
+    const direction=!Number.isFinite(row.movement)?'No baseline':row.movement>0?'Up':row.movement<0?'Down':'Flat';
+    const directionClass=row.movement>0?'movement-up':row.movement<0?'movement-down':'movement-flat';
+    html+=`<tr><td class="bold">${escapeHtml(row.ticker)}</td><td>${row.baseline?fmt(row.baseline.close):'—'}</td><td>${row.latest?fmt(row.latest.close):'—'}</td><td class="${row.movement>0?'pos':row.movement<0?'neg':''}">${fmtPct(row.movement)}</td><td>${fmtPct(benchmark)}</td><td class="${relative>0?'pos':relative<0?'neg':''}">${fmtPct(relative)}</td><td class="${directionClass}">${direction}</td></tr>`;
+  });
+  if(!rows.length) html+='<tr><td colspan="7" class="text-muted" style="text-align:center;padding:16px">No open holdings in this portfolio.</td></tr>';
+  document.getElementById('holdingComparisonTable').innerHTML=html+'</tbody>';
+}
+
+function saveHoldingReference(ticker){
+  const date=document.getElementById(`reference_date_${ticker}`).value;
+  const close=Number(document.getElementById(`reference_close_${ticker}`).value)||0;
+  if(!date||close<=0){toast('Date and a valid close are required','error');return;}
+  const rows=loadStockPrices().filter(row=>!(row.profile===profile()&&row.ticker===ticker&&row.asof_date===date));
+  rows.push({profile:profile(),ticker,asof_date:date,close,source:'manual-reference',fetched_at:new Date().toISOString()});
+  saveStockPrices(rows);render();toast(`${ticker} reference price saved`);
+}
+
+function renderHoldingReferences(){
+  const date=startDate()==='1900-01-01'?new Date().toISOString().slice(0,10):startDate();
+  const holdings=holdingsFor(profile());
+  let html='<thead><tr><th>Stock</th><th>Reference Date</th><th>Close</th><th></th></tr></thead><tbody>';
+  holdings.forEach(holding=>{
+    const existing=referenceRow(stockSnapshots(profile(),holding.ticker),date);
+    html+=`<tr><td class="bold">${escapeHtml(holding.ticker)}</td><td><input type="date" id="reference_date_${escapeAttr(holding.ticker)}" class="input-md" value="${escapeAttr(date)}"></td><td><input type="number" id="reference_close_${escapeAttr(holding.ticker)}" class="input-md" min="0" step="0.01" value="${existing?escapeAttr(existing.close):''}"></td><td><button class="btn btn-sm btn-secondary" onclick="saveHoldingReference(${jsArg(holding.ticker)})">Save</button></td></tr>`;
+  });
+  if(!holdings.length) html+='<tr><td colspan="4" class="text-muted" style="text-align:center;padding:12px">No open holdings.</td></tr>';
+  document.getElementById('holdingReferenceTable').innerHTML=html+'</tbody>';
+}
+
+function portfolioSeries(){
+  const holdings=holdingPerformance(profile()).filter(row=>row.baseline&&row.latest);
+  const benchmarkRows=benchmarkSnapshots();
+  const dates=[...new Set([...holdings.flatMap(row=>stockSnapshots(profile(),row.ticker).map(price=>price.asof_date)),...benchmarkRows.map(row=>row.asof_date)])].filter(date=>date>=startDate()).sort();
+  const totalWeight=holdings.reduce((sum,row)=>sum+(row.marketValue||row.cost_basis||0),0);
+  const portfolioData=dates.map(date=>{
+    if(!totalWeight) return null;
+    let coveredWeight=0,total=0;
+    holdings.forEach(row=>{
+      const current=rowAt(stockSnapshots(profile(),row.ticker),date);
+      const weight=row.marketValue||row.cost_basis||0;
+      if(!current||!row.baseline||weight<=0) return;
+      total+=p(Number(current.close),Number(row.baseline.close))*weight;
+      coveredWeight+=weight;
+    });
+    return coveredWeight?total/coveredWeight:null;
+  });
+  const benchmarkBase=referenceRow(benchmarkRows,startDate());
+  const benchmarkData=dates.map(date=>{
+    const row=rowAt(benchmarkRows,date);
+    return row&&benchmarkBase?p(Number(row.close),Number(benchmarkBase.close)):null;
+  });
+  return {dates,portfolioData,benchmarkData};
+}
+
+function renderChart(){
+  if(window.trendChart){window.trendChart.destroy();window.trendChart=null;}
+  const empty=document.getElementById('trendEmpty');
+  const wrap=document.getElementById('trendChartWrap');
+  const series=portfolioSeries();
+  const hasPortfolio=series.portfolioData.some(Number.isFinite);
+  if(!series.dates.length||!hasPortfolio){empty.style.display='block';empty.textContent='Add portfolio price snapshots for the selected period to draw the comparison.';wrap.style.display='none';return;}
+  empty.style.display='none';wrap.style.display='block';
+  window.trendChart=new Chart(document.getElementById('trendChart'),{
+    type:'line',
+    data:{labels:series.dates.map(date=>new Date(date).toLocaleDateString('en-SG',{month:'short',day:'numeric',year:'2-digit'})),datasets:[
+      {label:profile(),data:series.portfolioData,borderColor:CHART_COLORS[0],backgroundColor:'transparent',borderWidth:3,tension:0.25,spanGaps:true,pointRadius:2},
+      {label:benchmarkSymbol(),data:series.benchmarkData,borderColor:CHART_COLORS[1],backgroundColor:'transparent',borderWidth:2,tension:0.25,spanGaps:true,pointRadius:2},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#8b949e'}},tooltip:{callbacks:{label:context=>` ${context.dataset.label}: ${fmtPct(context.raw)}`}}},scales:{x:{ticks:{color:'#8b949e',maxTicksLimit:12},grid:{color:'rgba(255,255,255,0.05)'}},y:{ticks:{color:'#8b949e',callback:value=>`${value}%`},grid:{color:'rgba(255,255,255,0.05)'}}}}
+  });
+}
+
+function renderBenchmarkHistory(){
+  const rows=benchmarkSnapshots().slice(-10).reverse();
+  let html='<thead><tr><th>Date</th><th>Symbol</th><th>Close</th><th>Source</th></tr></thead><tbody>';
+  rows.forEach(row=>{html+=`<tr><td>${escapeHtml(row.asof_date)}</td><td class="bold">${escapeHtml(row.symbol)}</td><td>${fmt(row.close)}</td><td>${escapeHtml(row.source||'')}</td></tr>`;});
+  if(!rows.length) html+='<tr><td colspan="4" class="text-muted" style="text-align:center;padding:12px">No benchmark prices saved.</td></tr>';
+  document.getElementById('benchmarkHistoryTable').innerHTML=html+'</tbody>';
 }
 
 function render(){
-  const wf=document.getElementById('watchlistFilter');
-  const current=wf.value||'All';
-  wf.innerHTML='<option value="All">All Watchlists</option>'+watchlists().map(w=>`<option value="${escapeAttr(w.watchlist_id)}" ${w.watchlist_id===current?'selected':''}>${escapeHtml(w.name)}</option>`).join('');
-
-  const selected=selectedSymbols();
-  const symbols=uniqueTrackedSymbols();
-  document.getElementById('symbolPicker').innerHTML=symbols.map(s=>`
-    <label class="pick-item">
-      <input type="checkbox" ${selected.includes(s.symbol)?'checked':''} onchange="toggleSymbol(${jsArg(s.symbol)},this.checked)">
-      <span><span class="pick-symbol">${escapeHtml(s.symbol)}</span><div class="pick-meta">${escapeHtml(s.label||s.kind||'')}</div></span>
-    </label>`).join('') || '<div class="pick-item"><span class="pick-meta">No tracked symbols yet.</span></div>';
-
-  const rows=comparisonRows();
-  document.getElementById('compareCount').textContent=`${rows.length}/10 selected`;
-  renderBaselineHelper(rows);
-
-  let html='<thead><tr><th>Symbol</th><th>Jan 1 2025</th><th>Latest</th><th>% Move</th><th>Status</th></tr></thead><tbody>';
-  if(!rows.length) html+='<tr><td colspan="5" class="text-muted" style="text-align:center;padding:16px">Select tracked symbols to compare.</td></tr>';
-  rows.forEach(r=>{
-    const status=!r.baseline?'Missing baseline':!r.latest?'Missing current':'Ready';
-    html+=`<tr>
-      <td class="bold">${escapeHtml(r.symbol)}</td>
-      <td>${r.baseline?`${fmt(r.baselinePrice)} (${escapeHtml(r.baseline.asof_date)})`:'—'}</td>
-      <td>${r.latest?`${fmt(r.latestPrice)} (${escapeHtml(r.latest.asof_date)})`:'—'}</td>
-      <td class="${r.pct>0?'pos':r.pct<0?'neg':''} bold">${r.baseline&&r.latest?fmtPct(r.pct):'—'}</td>
-      <td class="text-muted">${status}</td>
-    </tr>`;
-  });
-  html+='</tbody>';
-  document.getElementById('compareTable').innerHTML=html;
-  renderChart(rows);
+  document.getElementById('benchmarkSymbol').value=benchmarkSymbol();
+  document.getElementById('benchmarkDate').value=startDate()==='1900-01-01'?new Date().toISOString().slice(0,10):startDate();
+  document.getElementById('chartPeriod').textContent=document.getElementById('periodSelect').selectedOptions[0].text;
+  renderKpis();renderAccounts();renderHoldings();renderHoldingReferences();renderChart();renderBenchmarkHistory();
 }
 
-function renderBaselineHelper(rows){
-  const el=document.getElementById('baselineHelperTable');
-  if(!el) return;
-  let html='<thead><tr><th>Selected Symbol</th><th>Jan 1 2025 Close</th><th>Status</th><th></th></tr></thead><tbody>';
-  if(!rows.length) html+='<tr><td colspan="4" class="text-muted" style="text-align:center;padding:12px">Select symbols above to prepare baselines.</td></tr>';
-  rows.forEach(r=>{
-    const existing=r.baselinePrice>0;
-    html+=`<tr>
-      <td class="bold">${escapeHtml(r.symbol)}</td>
-      <td><input type="number" class="input-md baseline-helper-close" data-symbol="${escapeAttr(r.symbol)}" min="0" step="0.01" value="${existing?escapeAttr(r.baselinePrice):''}" placeholder="Close"></td>
-      <td class="${existing?'pos':'text-muted'}">${existing?`Saved ${escapeHtml(r.baseline.asof_date)}`:'Missing'}</td>
-      <td><button class="btn btn-sm btn-secondary" onclick="saveBaselineFor(${jsArg(r.symbol)})">Save</button></td>
-    </tr>`;
-  });
-  html+='</tbody>';
-  el.innerHTML=html;
-}
-
-function renderChart(rows){
-  if(window.compareChart){window.compareChart.destroy();window.compareChart=null;}
-  const empty=document.getElementById('compareEmpty'), wrap=document.getElementById('compareChartWrap');
-  const ready=rows.filter(r=>r.baselinePrice>0);
-  const {dates,datasets}=chartData(ready);
-  if(!rows.length||!ready.length||!dates.length){empty.style.display='block';empty.textContent=!rows.length?'Select tracked symbols to compare.':'Add Jan 1 2025 baselines and current prices to draw comparison.';wrap.style.display='none';return;}
-  empty.style.display='none';wrap.style.display='block';
-  window.compareChart=new Chart(document.getElementById('compareChart'),{
-    type:'line',
-    data:{labels:dates.map(d=>new Date(d).toLocaleDateString('en-SG',{month:'short',day:'numeric',year:'2-digit'})),datasets},
-    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#8b949e',font:{size:11}}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${Number(ctx.raw||0).toFixed(2)}%`}}},scales:{x:{ticks:{color:'#8b949e',maxTicksLimit:12},grid:{color:'rgba(255,255,255,0.05)'}},y:{ticks:{color:'#8b949e',callback:v=>Number(v).toFixed(0)+'%'},grid:{color:'rgba(255,255,255,0.05)'}}}}
-  });
-}
-
-function exportCompareExcel(){
+function exportTrendExcel(){
+  const benchmark=selectedBenchmarkPerformance();
   exportToExcel([
-    {name:'Compare Selection',data:comparisonRows().map(r=>({symbol:r.symbol,baseline_date:r.baseline?.asof_date||'',baseline_price:r.baselinePrice,latest_date:r.latest?.asof_date||'',latest_price:r.latestPrice,move_pct:r.pct}))},
-    {name:'Tracker Prices',data:loadStockTrackerPrices().filter(r=>r.profile===profile())},
+    {name:'Portfolio Accounts',data:loadPortfolioAccounts().filter(account=>account.active!==false).map(account=>({portfolio:account.name,holdings:holdingsFor(account.name).length,period_return_pct:portfolioPerformance(account.name),benchmark:benchmarkSymbol(),benchmark_return_pct:benchmark}))},
+    {name:'Holding Comparison',data:holdingPerformance(profile()).map(row=>({ticker:row.ticker,start_date:row.baseline?.asof_date||'',start_price:row.baseline?.close||'',latest_date:row.latest?.asof_date||'',latest_price:row.latest?.close||'',movement_pct:row.movement,benchmark_return_pct:benchmark,relative_pct:Number.isFinite(row.movement)&&Number.isFinite(benchmark)?row.movement-benchmark:''}))},
   ]);
 }
 
-window.onProfileChange=function(){if(window.compareChart){window.compareChart.destroy();window.compareChart=null;}};
+window.onProfileChange=function(){render();};
 window.onDataLoaded=render;
 </script>
 </body>
