@@ -56,7 +56,7 @@ function getActiveProfile() {
 
 function setActiveProfile(name) {
   localStorage.setItem(PROFILE_KEY, name);
-  document.querySelectorAll('.global-profile-sel').forEach(select => { select.value = name; });
+  initProfileSelector();
   if (typeof window.onProfileChange === 'function') window.onProfileChange();
   if (typeof window.onDataLoaded === 'function') window.onDataLoaded();
 }
