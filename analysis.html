@@ -15,12 +15,29 @@
 .analysis-chart { position:relative; height:310px; }
 .analysis-empty { display:grid; place-items:center; height:100%; color:var(--text-muted); font-size:0.86rem; }
 .analysis-table-section { margin-top:4px; }
+.performance-panel { margin-bottom:20px; }
+.performance-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:12px; }
+.performance-header .analysis-panel-title { margin-bottom:0; }
+.period-controls { display:flex; flex-wrap:wrap; gap:3px; padding:3px; border:1px solid var(--border); border-radius:7px; background:var(--bg3); }
+.period-btn { border:1px solid transparent; border-radius:5px; background:transparent; color:var(--text-muted); padding:4px 10px; font:600 0.76rem 'IBM Plex Sans',sans-serif; cursor:pointer; }
+.period-btn:hover { color:var(--text); }
+.period-btn.active { background:var(--teal); color:#fff; }
+.comparison-chart { height:350px; }
+.stock-select { width:16px; height:16px; accent-color:var(--teal); cursor:pointer; }
+.ticker-select { border:0; background:none; color:var(--text); font:600 0.84rem 'IBM Plex Sans',sans-serif; cursor:pointer; }
+.ticker-select:hover { color:var(--teal); }
+.setup-label { display:inline-block; padding:3px 8px; border-radius:5px; font-size:0.76rem; font-weight:600; }
+.setup-stabilising { color:var(--green); background:rgba(63,185,80,0.1); }
+.setup-pullback { color:var(--yellow); background:rgba(210,153,34,0.1); }
+.setup-falling { color:var(--red); background:rgba(248,81,73,0.1); }
+.setup-extended { color:#58a6ff; background:rgba(88,166,255,0.1); }
+.setup-neutral { color:var(--text-muted); background:var(--bg3); }
 .sort-header { display:inline-flex; align-items:center; justify-content:flex-end; gap:5px; width:100%; padding:0; border:0; background:none; color:inherit; font:inherit; text-transform:inherit; cursor:pointer; white-space:nowrap; }
 th:first-child .sort-header { justify-content:flex-start; }
 .sort-header:hover, .sort-header:focus-visible { color:var(--text); }
 .sort-indicator { width:10px; color:var(--teal); }
 @media (max-width:1100px) { .analysis-grid { grid-template-columns:1fr; } }
-@media (max-width:768px) { .analysis-panel { padding:14px 12px; } .analysis-chart { height:270px; } }
+@media (max-width:768px) { .analysis-panel { padding:14px 12px; } .analysis-chart { height:270px; } .performance-header { flex-direction:column; } .comparison-chart { height:300px; } }
 </style>
 </head>
 <body>
@@ -69,6 +86,23 @@ th:first-child .sort-header { justify-content:flex-start; }
     </section>
   </div>
 
+  <section class="analysis-panel performance-panel">
+    <div class="performance-header">
+      <div class="analysis-panel-title">Portfolio vs Holdings</div>
+      <div class="period-controls" aria-label="Comparison period">
+        <button class="period-btn" data-performance-period="all" onclick="setPerformancePeriod('all')">All</button>
+        <button class="period-btn active" data-performance-period="ytd" onclick="setPerformancePeriod('ytd')">YTD</button>
+        <button class="period-btn" data-performance-period="1y" onclick="setPerformancePeriod('1y')">1Y</button>
+        <button class="period-btn" data-performance-period="6m" onclick="setPerformancePeriod('6m')">6M</button>
+        <button class="period-btn" data-performance-period="3m" onclick="setPerformancePeriod('3m')">3M</button>
+        <button class="period-btn" data-performance-period="1m" onclick="setPerformancePeriod('1m')">1M</button>
+        <button class="period-btn" data-performance-period="1w" onclick="setPerformancePeriod('1w')">1W</button>
+      </div>
+    </div>
+    <div class="analysis-chart comparison-chart"><canvas id="performanceChart"></canvas></div>
+    <div class="tbl-wrap mt-16"><table id="performanceTable"></table></div>
+  </section>
+
   <section class="analysis-table-section">
     <div class="section-header"><div class="section-title">Holding Analysis</div></div>
     <div class="tbl-wrap"><table id="analysisTable"></table></div>
@@ -94,6 +128,11 @@ let sortState={key:'marketValue',direction:'desc'};
 let analysisRows=[];
 let allocationChart=null;
 let comparisonChart=null;
+let performanceChart=null;
+let performancePeriod='ytd';
+let selectedTickers=new Set();
+let selectionProfile='';
+let latestPerformanceData=null;
 
 function profile(){return getActiveProfile();}
 function isConsolidated(){return profile()===CONSOLIDATED_PROFILE;}
@@ -138,6 +177,82 @@ function holdingsFor(profiles,txns=transactionsFor(profiles)){
   return profiles.length>1
     ? StockCore.computeConsolidatedHoldings(txns,profiles,()=>1).holdings
     : StockCore.computeHoldings(txns,()=>1).holdings;
+}
+
+function rangeStart(period,endDate){
+  if(period==='all')return '';
+  const end=new Date(`${endDate}T00:00:00Z`);
+  if(period==='ytd')return `${end.getUTCFullYear()}-01-01`;
+  const days={"1w":7,"1m":30,"3m":90,"6m":180,"1y":365}[period]||0;
+  end.setUTCDate(end.getUTCDate()-days);
+  return end.toISOString().slice(0,10);
+}
+
+function priceFromSeries(series,date){
+  let low=0,high=series.length-1,best=null;
+  while(low<=high){
+    const middle=Math.floor((low+high)/2);
+    if(series[middle].asof_date<=date){best=series[middle];low=middle+1;}else high=middle-1;
+  }
+  return best;
+}
+
+function performanceData(){
+  const txns=[...selectedTransactions()].sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  const prices=selectedPrices();
+  const tickers=analysisRows.map(row=>row.ticker);
+  const endDate=prices.reduce((latest,row)=>String(row.asof_date)>latest?String(row.asof_date):latest,'')||new Date().toISOString().slice(0,10);
+  const start=rangeStart(performancePeriod,endDate);
+  const priceSeries=Object.fromEntries(tickers.map(ticker=>[ticker,prices.filter(row=>row.ticker===ticker&&Number(row.close)>0).sort((a,b)=>String(a.asof_date).localeCompare(String(b.asof_date)))]));
+  let dates=[...new Set([...prices.map(row=>row.asof_date),...txns.map(row=>row.date)])].filter(Boolean).filter(date=>date<=endDate).sort();
+  if(start)dates=dates.filter(date=>date>=start);
+  if(!dates.length)return {dates:[],labels:[],portfolio:[],stocks:{},summaries:[]};
+
+  const openingDate=dates[0];
+  const totals=[];
+  const flowsByDate=new Map();
+  txns.forEach(row=>{
+    const current=flowsByDate.get(row.date)||{purchases:0,sales:0};
+    const rowFlow=flows([row]);
+    current.purchases+=rowFlow.purchases;current.sales+=rowFlow.sales;
+    flowsByDate.set(row.date,current);
+  });
+  dates.forEach(date=>{
+    const datedHoldings=holdingsFor(selectedProfiles(),txns.filter(row=>row.date<=date));
+    totals.push(datedHoldings.reduce((sum,holding)=>{
+      const close=Number(priceFromSeries(priceSeries[holding.ticker]||[],date)?.close)||holding.avg_cost||0;
+      return sum+holding.qty*close;
+    },0));
+  });
+  const periodFlows=dates.map((date,index)=>index===0&&start?{purchases:0,sales:0}:(flowsByDate.get(date)||{purchases:0,sales:0}));
+  const openingCapital=start?(totals[0]||0):0;
+  const portfolio=StockCore.investmentReturnSeries(totals,periodFlows,openingCapital);
+  const stocks={};
+  const latestDate=dates[dates.length-1];
+  tickers.forEach(ticker=>{
+    const values=dates.map(date=>Number(priceFromSeries(priceSeries[ticker]||[],date)?.close)||0);
+    stocks[ticker]=StockCore.performanceSeries(values);
+  });
+  const portfolioReturn=[...portfolio].reverse().find(value=>value!=null)??null;
+  const summaries=tickers.map(ticker=>{
+    const series=priceSeries[ticker]||[];
+    const current=priceFromSeries(series,latestDate)||series[series.length-1];
+    const baseline=start?(priceFromSeries(series,start)||series.find(row=>row.asof_date>=start)):series[0];
+    const periodReturn=baseline&&current?change(Number(current.close),Number(baseline.close)):null;
+    const yearStart=rangeStart('1y',latestDate);
+    const yearPrices=series.filter(row=>row.asof_date>=yearStart&&row.asof_date<=latestDate).map(row=>Number(row.close)).filter(value=>value>0);
+    const high52=yearPrices.length?Math.max(...yearPrices):0;
+    const drawdown=high52&&current?change(Number(current.close),high52):null;
+    const recent=series.filter(row=>row.asof_date<=latestDate).slice(-20).map(row=>Number(row.close)).filter(value=>value>0);
+    const average20=recent.length?recent.reduce((sum,value)=>sum+value,0)/recent.length:0;
+    const trend20=average20&&current?change(Number(current.close),average20):null;
+    const relative=periodReturn!=null&&portfolioReturn!=null?periodReturn-portfolioReturn:null;
+    const setup=StockCore.classifyOpportunity(drawdown,trend20,relative);
+    return {ticker,periodReturn,portfolioReturn,relative,drawdown,trend20,setup:setup.label,setupClass:setup.key};
+  });
+  const compact=['1w','1m','3m','6m'].includes(performancePeriod);
+  const labels=dates.map(date=>new Date(`${date}T00:00:00Z`).toLocaleDateString('en-SG',compact?{day:'numeric',month:'short'}:{month:'short',year:'2-digit'}));
+  return {dates,labels,portfolio,stocks,summaries,openingDate};
 }
 
 function buildRows(){
@@ -208,6 +323,45 @@ function renderCharts(rows){
   comparisonChart=new Chart(document.getElementById('comparisonChart'),{type:'bar',data:{labels:comparison.map(row=>row.name),datasets:[{label:'Market Value',data:comparison.map(row=>row.marketValue),backgroundColor:comparison.map((row,index)=>COLORS[index%COLORS.length]),borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:context=>money(context.raw)}}},scales:{x:{ticks:{color:'#8b949e',callback:value=>money(value)},grid:{color:'rgba(255,255,255,0.05)'}},y:{ticks:{color:'#c9d1d9'},grid:{display:false}}}}});
 }
 
+function setPerformancePeriod(period){
+  performancePeriod=period;
+  document.querySelectorAll('[data-performance-period]').forEach(button=>button.classList.toggle('active',button.dataset.performancePeriod===period));
+  renderPerformance();
+}
+
+function toggleTicker(ticker){
+  if(selectedTickers.has(ticker))selectedTickers.delete(ticker);else selectedTickers.add(ticker);
+  renderPerformance();
+}
+
+function renderPerformance(){
+  latestPerformanceData=performanceData();
+  const data=latestPerformanceData;
+  if(performanceChart)performanceChart.destroy();
+  const selected=[...selectedTickers].filter(ticker=>data.stocks[ticker]);
+  const datasets=[{
+    label:'Portfolio',data:data.portfolio,borderColor:'#e6edf3',backgroundColor:'transparent',borderWidth:3,tension:0.25,pointRadius:0,pointHoverRadius:4,
+  },...selected.map((ticker,index)=>({
+    label:ticker,data:data.stocks[ticker],borderColor:COLORS[index%COLORS.length],backgroundColor:'transparent',borderWidth:2,tension:0.25,pointRadius:0,pointHoverRadius:4,
+  }))];
+  performanceChart=new Chart(document.getElementById('performanceChart'),{
+    type:'line',data:{labels:data.labels,datasets},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#c9d1d9',boxWidth:18}},tooltip:{callbacks:{label:context=>`${context.dataset.label}: ${context.raw==null?'—':pct(context.raw)}`}}},scales:{x:{ticks:{color:'#8b949e',maxTicksLimit:12},grid:{color:'rgba(255,255,255,0.05)'}},y:{ticks:{color:'#8b949e',callback:value=>`${Number(value).toFixed(0)}%`},grid:{color:'rgba(255,255,255,0.05)'}}}}
+  });
+
+  const rows=[...data.summaries].sort((a,b)=>(b.relative??-Infinity)-(a.relative??-Infinity));
+  const body=rows.map(row=>`<tr>
+    <td><input class="stock-select" type="checkbox" ${selectedTickers.has(row.ticker)?'checked':''} onchange="toggleTicker(${jsArg(row.ticker)})" aria-label="Compare ${escapeAttr(row.ticker)}"></td>
+    <td><button class="ticker-select" onclick="toggleTicker(${jsArg(row.ticker)})">${escapeHtml(row.ticker)}</button></td>
+    <td class="${signedClass(row.periodReturn)}">${pct(row.periodReturn)}</td>
+    <td class="${signedClass(row.portfolioReturn)}">${pct(row.portfolioReturn)}</td>
+    <td class="${signedClass(row.relative)}">${pct(row.relative)}</td>
+    <td class="${signedClass(row.drawdown)}">${pct(row.drawdown)}</td>
+    <td class="${signedClass(row.trend20)}">${pct(row.trend20)}</td>
+    <td><span class="setup-label setup-${row.setupClass}">${row.setup}</span></td>
+  </tr>`).join('');
+  document.getElementById('performanceTable').innerHTML=`<thead><tr><th style="width:42px">Show</th><th>Stock</th><th>Period Return</th><th>Portfolio</th><th>Vs Portfolio</th><th>From 52W High</th><th>Vs 20D Avg</th><th>Setup</th></tr></thead><tbody>${body||'<tr><td colspan="8" class="text-muted" style="text-align:center;padding:20px">No price history is available.</td></tr>'}</tbody>`;
+}
+
 function setSort(key){sortState=sortState.key===key?{key,direction:sortState.direction==='asc'?'desc':'asc'}:{key,direction:key==='ticker'?'asc':'desc'};renderTable();}
 function sortedRows(){
   const column=COLUMNS.find(item=>item.key===sortState.key)||COLUMNS[0];
@@ -225,7 +379,8 @@ function renderTable(){
 }
 
 function exportAnalysis(){
-  exportToExcel([{name:'holding_analysis',data:analysisRows.map(row=>({Ticker:row.ticker,'Market Value USD':row.marketValue,'Weight %':row.weight,'Cost Basis USD':row.costBasis,'Unrealized P&L USD':row.unrealized,'Return on Cost %':row.returnPct,'1W %':row.weekPct,'1M %':row.monthPct,'YTD %':row.ytdPct,'As Of':row.asOf}))},{name:'account_summary',data:accountRows()}]);
+  const performance=(latestPerformanceData?.summaries||[]).map(row=>({Ticker:row.ticker,Period:performancePeriod.toUpperCase(),'Period Return %':row.periodReturn,'Portfolio Return %':row.portfolioReturn,'Vs Portfolio %':row.relative,'From 52W High %':row.drawdown,'Vs 20D Average %':row.trend20,Setup:row.setup}));
+  exportToExcel([{name:'holding_analysis',data:analysisRows.map(row=>({Ticker:row.ticker,'Market Value USD':row.marketValue,'Weight %':row.weight,'Cost Basis USD':row.costBasis,'Unrealized P&L USD':row.unrealized,'Return on Cost %':row.returnPct,'1W %':row.weekPct,'1M %':row.monthPct,'YTD %':row.ytdPct,'As Of':row.asOf}))},{name:'performance',data:performance},{name:'account_summary',data:accountRows()}]);
 }
 
 function render(){
@@ -233,7 +388,11 @@ function render(){
   document.getElementById('analysisTitle').textContent=`${name} Analysis`;
   document.title=`${name} Analysis - Portfolio Tracker`;
   analysisRows=buildRows();
-  renderKpis(analysisRows);renderCharts(analysisRows);renderTable();
+  if(selectionProfile!==name){
+    selectionProfile=name;
+    selectedTickers=new Set([...analysisRows].sort((a,b)=>b.marketValue-a.marketValue).slice(0,3).map(row=>row.ticker));
+  }
+  renderKpis(analysisRows);renderCharts(analysisRows);renderPerformance();renderTable();
 }
 window.onProfileChange=render;
 window.onDataLoaded=render;

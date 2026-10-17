@@ -109,6 +109,14 @@ test('investment return series can measure a selected period from opening value'
   assert.deepEqual(result, [0, 0, 10]);
 });
 
+test('opportunity classification separates stabilising pullbacks from falling prices', () => {
+  assert.deepEqual(core.classifyOpportunity(-24, -5, -10), { label: 'Falling / wait', key: 'falling' });
+  assert.deepEqual(core.classifyOpportunity(-16, 1, -3), { label: 'Stabilising', key: 'stabilising' });
+  assert.deepEqual(core.classifyOpportunity(-13, -1, 2), { label: 'Pullback', key: 'pullback' });
+  assert.deepEqual(core.classifyOpportunity(-2, 4, 8), { label: 'Extended', key: 'extended' });
+  assert.deepEqual(core.classifyOpportunity(-6, 1, 2), { label: 'Neutral', key: 'neutral' });
+});
+
 test('normalizeDatabase preserves unknown fields and fills missing collections', () => {
   const normalized = core.normalizeDatabase({ finance_records: [{ amount: 10 }], stock_transactions: [{ txn_id: 't1' }], custom_note: 'keep me' }, 1);
   assert.equal(normalized.schema_version, 1);

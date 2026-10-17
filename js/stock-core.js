@@ -91,6 +91,17 @@
     });
   }
 
+  function classifyOpportunity(drawdown, trend20, relativeReturn) {
+    const dd = Number.isFinite(drawdown) ? drawdown : null;
+    const trend = Number.isFinite(trend20) ? trend20 : null;
+    const relative = Number.isFinite(relativeReturn) ? relativeReturn : null;
+    if (dd !== null && dd <= -20 && trend !== null && trend < -3) return { label: 'Falling / wait', key: 'falling' };
+    if (dd !== null && dd <= -10 && trend !== null && trend >= 0) return { label: 'Stabilising', key: 'stabilising' };
+    if (dd !== null && dd <= -10) return { label: 'Pullback', key: 'pullback' };
+    if (dd !== null && dd > -5 && relative !== null && relative > 5) return { label: 'Extended', key: 'extended' };
+    return { label: 'Neutral', key: 'neutral' };
+  }
+
   function computeHoldings(transactions, rateResolver) {
     const positions = {};
     const realized = {};
@@ -270,7 +281,7 @@
 
   return {
     DEFAULT_FX_TO_SGD, DATA_COLLECTION_KEYS, number, latestDatedRow,
-    fxRateToSgd, convertToSgd, performanceSeries, chainReturnSeries, investmentReturnSeries,
+    fxRateToSgd, convertToSgd, performanceSeries, chainReturnSeries, investmentReturnSeries, classifyOpportunity,
     computeHoldings, computeConsolidatedHoldings, normalizeDatabase, mergeDatabases,
   };
 });
