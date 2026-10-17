@@ -8,6 +8,17 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+SPLITS = {
+    'NVDA': [('2024-06-10', 10)],
+    'SMCI': [('2024-10-01', 10)],
+    'SCHD': [('2024-10-11', 3)],
+    'IBKR': [('2025-06-18', 4)],
+    'NFLX': [('2025-11-17', 10)],
+    'VGT': [('2026-04-21', 8)],
+    'VUG': [('2026-04-21', 6)],
+    'VO': [('2026-04-21', 4)],
+}
+
 
 def read_trades(filename):
     trades = []
@@ -35,19 +46,27 @@ def natural_key(row):
 
 def transform(record, profile, imported_at):
     action = record['Transaction Type'].upper()
-    quantity = abs(number(record['Quantity']))
+    ticker = record['Symbol'].strip()
+    original_quantity = abs(number(record['Quantity']))
+    original_price = number(record['Price'])
+    split_factor = 1
+    for effective_date, factor in SPLITS.get(ticker.upper(), []):
+        if record['Date'] < effective_date:
+            split_factor *= factor
+    quantity = original_quantity * split_factor
+    price = original_price / split_factor
     source_key = '|'.join(record.get(field, '') for field in (
         'Date', 'Account', 'Transaction Type', 'Symbol', 'Quantity', 'Price',
         'Price Currency', 'Gross Amount ', 'Commission', 'Net Amount'
     ))
     digest = hashlib.sha256(source_key.encode('utf-8')).hexdigest()[:24]
-    return {
+    transformed = {
         'txn_id': f'ibkr-{digest}',
         'profile': profile,
-        'ticker': record['Symbol'].strip(),
+        'ticker': ticker,
         'action': action,
         'qty': quantity,
-        'price': number(record['Price']),
+        'price': price,
         'commission': abs(number(record['Commission'])),
         'currency': 'USD',
         'broker_currency': record['Price Currency'].strip(),
@@ -59,6 +78,13 @@ def transform(record, profile, imported_at):
         'source': 'IBKR Transaction History CSV',
         'created_at': imported_at,
     }
+    if split_factor != 1:
+        transformed.update({
+            'original_qty': original_quantity,
+            'original_price': original_price,
+            'split_factor': split_factor,
+        })
+    return transformed
 
 
 def main():

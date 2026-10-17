@@ -93,43 +93,55 @@
         const rate = number(resolveRate(currency, row.date));
         const priceSgd = price * rate;
         const commissionSgd = Math.abs(number(row.commission)) * rate;
-        if (!positions[ticker]) positions[ticker] = { qty: 0, cost: 0, currency };
+        if (!positions[ticker]) positions[ticker] = { lots: [], currency };
         if (!Object.hasOwn(realized, ticker)) realized[ticker] = 0;
         positions[ticker].currency = currency;
 
         if (String(row.action || '').toUpperCase() === 'BUY') {
-          positions[ticker].qty += qty;
-          positions[ticker].cost += qty * priceSgd + commissionSgd;
+          if (qty > 0) {
+            positions[ticker].lots.push({
+              qty,
+              cost: qty * priceSgd + commissionSgd + number(row.cost_basis_adjustment),
+            });
+          }
           return;
         }
 
-        const sellQty = Math.min(qty, Math.max(positions[ticker].qty, 0));
-        const averageCost = positions[ticker].qty > 0 ? positions[ticker].cost / positions[ticker].qty : 0;
+        const availableQty = positions[ticker].lots.reduce((sum, lot) => sum + lot.qty, 0);
+        const sellQty = Math.min(qty, Math.max(availableQty, 0));
         const allocatedCommission = qty > 0 ? commissionSgd * (sellQty / qty) : 0;
-        realized[ticker] += sellQty * (priceSgd - averageCost) - allocatedCommission;
-        positions[ticker].qty -= sellQty;
-        positions[ticker].cost -= sellQty * averageCost;
-        if (Math.abs(positions[ticker].qty) < 0.0000001) {
-          positions[ticker].qty = 0;
-          positions[ticker].cost = 0;
+        let remaining = sellQty;
+        let removedCost = 0;
+        while (remaining > 0.0000001 && positions[ticker].lots.length) {
+          const lot = positions[ticker].lots[0];
+          const consumed = Math.min(remaining, lot.qty);
+          const unitCost = lot.qty > 0 ? lot.cost / lot.qty : 0;
+          removedCost += consumed * unitCost;
+          lot.qty -= consumed;
+          lot.cost -= consumed * unitCost;
+          remaining -= consumed;
+          if (lot.qty < 0.0000001) positions[ticker].lots.shift();
         }
+        realized[ticker] += sellQty * priceSgd - allocatedCommission - removedCost;
       });
 
     const holdings = [];
     const realRows = [];
     Object.entries(positions).forEach(([ticker, position]) => {
-      const averageCost = position.qty > 0 ? position.cost / position.qty : 0;
-      if (position.qty > 0.0001) {
+      const quantity = position.lots.reduce((sum, lot) => sum + lot.qty, 0);
+      const cost = position.lots.reduce((sum, lot) => sum + lot.cost, 0);
+      const averageCost = quantity > 0 ? cost / quantity : 0;
+      if (quantity > 0.0001) {
         holdings.push({
           ticker,
-          qty: position.qty,
+          qty: quantity,
           currency: position.currency || 'SGD',
           avg_cost: averageCost,
-          cost_basis: position.cost,
+          cost_basis: cost,
           realized_pnl: realized[ticker] || 0,
         });
       }
-      if (realized[ticker]) realRows.push({ ticker, realized_pnl: realized[ticker], open_qty: position.qty });
+      if (realized[ticker]) realRows.push({ ticker, realized_pnl: realized[ticker], open_qty: quantity });
     });
     return { holdings, realRows };
   }

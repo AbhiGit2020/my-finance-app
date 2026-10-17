@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const core = require('../js/stock-core.js');
 
-test('computeHoldings uses average cost and dated FX', () => {
+test('computeHoldings uses FIFO lots and dated FX', () => {
   const rates = [
     { currency: 'USD', asof_date: '2025-01-01', rate_to_sgd: 1.3 },
     { currency: 'USD', asof_date: '2025-06-01', rate_to_sgd: 1.4 },
@@ -14,8 +14,8 @@ test('computeHoldings uses average cost and dated FX', () => {
   ];
   const result = core.computeHoldings(transactions, (currency, date) => core.fxRateToSgd(currency, date, rates));
   assert.equal(result.holdings[0].qty, 15);
-  assert.equal(result.holdings[0].avg_cost, 20.5);
-  assert.equal(result.realRows[0].realized_pnl, 107.5);
+  assert.equal(result.holdings[0].avg_cost, 23);
+  assert.equal(result.realRows[0].realized_pnl, 145);
 });
 
 test('computeHoldings never creates a negative position from an oversized sell', () => {
@@ -36,6 +36,15 @@ test('computeHoldings includes commissions in cost basis and realized P&L', () =
   assert.equal(result.holdings[0].cost_basis, 51);
   assert.equal(result.holdings[0].avg_cost, 10.2);
   assert.ok(Math.abs(result.holdings[0].realized_pnl - 8) < 1e-9);
+});
+
+test('computeHoldings applies an audited cost basis adjustment without changing quantity', () => {
+  const result = core.computeHoldings([
+    { ticker: 'ABC', action: 'BUY', qty: 10, price: 10, commission: 2, cost_basis_adjustment: -12, currency: 'USD', date: '2025-01-01' },
+  ]);
+  assert.equal(result.holdings[0].qty, 10);
+  assert.equal(result.holdings[0].cost_basis, 90);
+  assert.equal(result.holdings[0].avg_cost, 9);
 });
 
 test('dated FX uses the latest rate on or before the transaction date', () => {
