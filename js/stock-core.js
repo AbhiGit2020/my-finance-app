@@ -17,7 +17,7 @@
   const DATA_COLLECTION_KEYS = Object.freeze([
     'portfolio_accounts',
     'stock_transactions', 'stock_prices', 'stock_watchlists',
-    'stock_tracker_symbols', 'stock_tracker_prices', 'fx_rates',
+    'stock_tracker_symbols', 'stock_tracker_prices', 'stock_classifications', 'fx_rates',
   ]);
   const COLLECTION_ID_FIELDS = Object.freeze({
     portfolio_accounts: ['account_id'],
@@ -26,6 +26,7 @@
     stock_watchlists: ['watchlist_id'],
     stock_tracker_symbols: ['symbol_id'],
     stock_tracker_prices: ['price_id'],
+    stock_classifications: ['ticker'],
     fx_rates: ['rate_id'],
   });
 

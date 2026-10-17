@@ -15,6 +15,16 @@
 .analysis-chart { position:relative; height:310px; }
 .analysis-empty { display:grid; place-items:center; height:100%; color:var(--text-muted); font-size:0.86rem; }
 .analysis-table-section { margin-top:4px; }
+.exposure-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
+.exposure-panel { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:16px; min-width:0; }
+.exposure-title { color:var(--text-muted); font-size:0.78rem; font-weight:600; text-transform:uppercase; margin-bottom:12px; }
+.exposure-list { display:grid; gap:9px; max-height:280px; overflow:auto; padding-right:3px; }
+.exposure-label { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:0.8rem; margin-bottom:4px; }
+.exposure-label span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.exposure-value { color:var(--text); font-family:'IBM Plex Mono',monospace; font-weight:600; }
+.exposure-track { height:5px; border-radius:3px; background:var(--bg3); overflow:hidden; }
+.exposure-fill { height:100%; border-radius:3px; background:var(--teal); }
+.classification-table input, .classification-table select { width:100%; min-width:140px; }
 .performance-panel { margin-bottom:20px; }
 .performance-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:12px; }
 .performance-header .analysis-panel-title { margin-bottom:0; }
@@ -50,8 +60,8 @@
 th:first-child .sort-header { justify-content:flex-start; }
 .sort-header:hover, .sort-header:focus-visible { color:var(--text); }
 .sort-indicator { width:10px; color:var(--teal); }
-@media (max-width:1100px) { .analysis-grid { grid-template-columns:1fr; } }
-@media (max-width:768px) { .analysis-panel { padding:14px 12px; } .analysis-chart { height:270px; } .performance-header { flex-direction:column; } .comparison-chart { height:300px; } .analysis-help-button { left:16px; bottom:16px; } .analysis-help { left:16px; bottom:68px; } }
+@media (max-width:1100px) { .analysis-grid { grid-template-columns:1fr; } .exposure-grid { grid-template-columns:1fr 1fr; } }
+@media (max-width:768px) { .analysis-panel { padding:14px 12px; } .analysis-chart { height:270px; } .performance-header { flex-direction:column; } .comparison-chart { height:300px; } .analysis-help-button { left:16px; bottom:16px; } .analysis-help { left:16px; bottom:68px; } .exposure-grid { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -88,6 +98,21 @@ th:first-child .sort-header { justify-content:flex-start; }
   </div>
 
   <div class="kpi-grid" id="analysisKpis"></div>
+
+  <section class="exposure-grid" aria-label="Portfolio exposure summary">
+    <div class="exposure-panel"><div class="exposure-title">Stocks vs ETFs</div><div class="exposure-list" id="assetExposure"></div></div>
+    <div class="exposure-panel"><div class="exposure-title">Industry Exposure</div><div class="exposure-list" id="industryExposure"></div></div>
+    <div class="exposure-panel"><div class="exposure-title">Country Exposure</div><div class="exposure-list" id="countryExposure"></div></div>
+  </section>
+
+  <details>
+    <summary>Review Ticker Classifications</summary>
+    <div class="details-content">
+      <div class="text-muted mb-16" style="font-size:0.8rem">ETF classifications show their primary exposure. Broad funds are not split into every underlying company, industry, or country.</div>
+      <div class="tbl-wrap"><table class="classification-table" id="classificationTable"></table></div>
+      <div class="flex mt-16" style="justify-content:flex-end"><button class="btn btn-primary" onclick="saveClassificationEdits()">Save Classifications</button></div>
+    </div>
+  </details>
 
   <div class="analysis-grid">
     <section class="analysis-panel">
@@ -142,6 +167,43 @@ th:first-child .sort-header { justify-content:flex-start; }
 <div class="toast-container" id="toastContainer"></div>
 <script>
 const COLORS=['#1f9d8a','#4d8dff','#d29922','#df6b9b','#8b7cf6','#52b788','#f07f4f','#48a9a6','#b8a13a','#778da9'];
+const DEFAULT_CLASSIFICATIONS={
+  'AAPL':['Stock','Technology Hardware','United States'],
+  'AMD':['Stock','Semiconductors','United States'],
+  'AMZN':['Stock','Consumer Discretionary','United States'],
+  'BASD':['Stock','Chemicals','Germany'],
+  'BMWD':['Stock','Automotive','Germany'],
+  'BRK B':['Stock','Diversified Financials','United States'],
+  'CROX':['Stock','Consumer Discretionary','United States'],
+  'DELL':['Stock','Technology Hardware','United States'],
+  'ENGI':['Stock','Utilities','France'],
+  'FLIN':['ETF','Diversified ETF','India'],
+  'GOOG':['Stock','Communication Services','United States'],
+  'IAUM':['ETF','Gold','Global'],
+  'IBIT':['ETF','Bitcoin','Global'],
+  'IBKR':['Stock','Financials','United States'],
+  'KO':['Stock','Consumer Staples','United States'],
+  'LLY':['Stock','Healthcare','United States'],
+  'META':['Stock','Communication Services','United States'],
+  'MSFT':['Stock','Software','United States'],
+  'MU':['Stock','Semiconductors','United States'],
+  'NFLX':['Stock','Communication Services','United States'],
+  'NVDA':['Stock','Semiconductors','United States'],
+  'PEP':['Stock','Consumer Staples','United States'],
+  'PFE':['Stock','Healthcare','United States'],
+  'QQQM':['ETF','Diversified ETF','United States'],
+  'SCHD':['ETF','Diversified ETF','United States'],
+  'SMCI':['Stock','Technology Hardware','United States'],
+  'SMH':['ETF','Semiconductors','Global'],
+  'SNAP':['Stock','Communication Services','United States'],
+  'TSLA':['Stock','Automotive','United States'],
+  'TSM':['Stock','Semiconductors','Taiwan'],
+  'VGT':['ETF','Technology','United States'],
+  'VO':['ETF','Diversified ETF','United States'],
+  'VOO':['ETF','Diversified ETF','United States'],
+  'VT':['ETF','Diversified ETF','Global'],
+  'VUG':['ETF','Diversified ETF','United States'],
+};
 const COLUMNS=[
   {key:'ticker',label:'Ticker',type:'text'},
   {key:'marketValue',label:'Market Value',type:'number'},
@@ -217,6 +279,55 @@ function holdingsFor(profiles,txns=transactionsFor(profiles)){
   return profiles.length>1
     ? StockCore.computeConsolidatedHoldings(txns,profiles,()=>1).holdings
     : StockCore.computeHoldings(txns,()=>1).holdings;
+}
+
+function classificationFor(ticker){
+  const stored=loadStockClassifications().find(row=>String(row.ticker).toUpperCase()===ticker);
+  if(stored)return {assetType:stored.asset_type||'Unclassified',industry:stored.industry||'Unclassified',country:stored.country||'Unclassified'};
+  const defaults=DEFAULT_CLASSIFICATIONS[ticker];
+  return defaults?{assetType:defaults[0],industry:defaults[1],country:defaults[2]}:{assetType:'Unclassified',industry:'Unclassified',country:'Unclassified'};
+}
+
+function exposureGroups(rows,field){
+  const total=rows.reduce((sum,row)=>sum+row.marketValue,0);
+  const groups=new Map();
+  rows.forEach(row=>{
+    const label=classificationFor(row.ticker)[field]||'Unclassified';
+    groups.set(label,(groups.get(label)||0)+row.marketValue);
+  });
+  return [...groups].map(([label,value])=>({label,value,pct:total>0?value/total*100:0})).sort((a,b)=>b.value-a.value);
+}
+
+function renderExposureList(id,groups){
+  document.getElementById(id).innerHTML=groups.map((row,index)=>`<div><div class="exposure-label"><span>${escapeHtml(row.label)}</span><span class="exposure-value">${fmt(row.pct,1)}%</span></div><div class="exposure-track"><div class="exposure-fill" style="width:${Math.max(0,Math.min(100,row.pct))}%;background:${COLORS[index%COLORS.length]}"></div></div></div>`).join('')||'<div class="text-muted">No holdings</div>';
+}
+
+function renderExposureSummary(rows){
+  renderExposureList('assetExposure',exposureGroups(rows,'assetType'));
+  renderExposureList('industryExposure',exposureGroups(rows,'industry'));
+  renderExposureList('countryExposure',exposureGroups(rows,'country'));
+}
+
+function renderClassificationEditor(rows){
+  const body=[...rows].sort((a,b)=>a.ticker.localeCompare(b.ticker)).map(row=>{
+    const classification=classificationFor(row.ticker);
+    return `<tr data-classification-ticker="${escapeAttr(row.ticker)}"><td class="bold">${escapeHtml(row.ticker)}</td><td><select class="classification-type"><option ${classification.assetType==='Stock'?'selected':''}>Stock</option><option ${classification.assetType==='ETF'?'selected':''}>ETF</option><option ${classification.assetType==='Other'?'selected':''}>Other</option><option ${classification.assetType==='Unclassified'?'selected':''}>Unclassified</option></select></td><td><input class="classification-industry" value="${escapeAttr(classification.industry)}"></td><td><input class="classification-country" value="${escapeAttr(classification.country)}"></td></tr>`;
+  }).join('');
+  document.getElementById('classificationTable').innerHTML=`<thead><tr><th>Ticker</th><th>Type</th><th>Industry</th><th>Country / Exposure</th></tr></thead><tbody>${body}</tbody>`;
+}
+
+async function saveClassificationEdits(){
+  const edits=[...document.querySelectorAll('[data-classification-ticker]')].map(row=>({
+    ticker:String(row.dataset.classificationTicker||'').toUpperCase(),
+    asset_type:row.querySelector('.classification-type').value,
+    industry:row.querySelector('.classification-industry').value.trim()||'Unclassified',
+    country:row.querySelector('.classification-country').value.trim()||'Unclassified',
+    updated_at:new Date().toISOString(),
+  }));
+  const editedTickers=new Set(edits.map(row=>row.ticker));
+  saveStockClassifications([...loadStockClassifications().filter(row=>!editedTickers.has(String(row.ticker).toUpperCase())),...edits]);
+  await localSave();
+  renderExposureSummary(analysisRows);
 }
 
 function rangeStart(period,endDate){
@@ -435,7 +546,8 @@ function renderTable(){
 
 function exportAnalysis(){
   const performance=(latestPerformanceData?.summaries||[]).map(row=>({Ticker:row.ticker,Period:performancePeriod.toUpperCase(),'Period Return %':row.periodReturn,'Portfolio Return %':row.portfolioReturn,'Vs Portfolio %':row.relative,'From 52W High %':row.drawdown,'Weeks Since 52W High':row.weeksSinceHigh,'1W %':row.return1w,'1M %':row.return1m,'3M %':row.return3m,'6M %':row.return6m,'9M %':row.return9m,Setup:row.setup}));
-  exportToExcel([{name:'holding_analysis',data:analysisRows.map(row=>({Ticker:row.ticker,'Market Value USD':row.marketValue,'Weight %':row.weight,'Cost Basis USD':row.costBasis,'Unrealized P&L USD':row.unrealized,'Return on Cost %':row.returnPct,'1W %':row.weekPct,'1M %':row.monthPct,'YTD %':row.ytdPct,'As Of':row.asOf}))},{name:'performance',data:performance},{name:'account_summary',data:accountRows()}]);
+  const classifications=analysisRows.map(row=>({Ticker:row.ticker,'Asset Type':classificationFor(row.ticker).assetType,Industry:classificationFor(row.ticker).industry,'Country / Exposure':classificationFor(row.ticker).country,'Market Value USD':row.marketValue,'Portfolio Weight %':row.weight}));
+  exportToExcel([{name:'holding_analysis',data:analysisRows.map(row=>({Ticker:row.ticker,'Market Value USD':row.marketValue,'Weight %':row.weight,'Cost Basis USD':row.costBasis,'Unrealized P&L USD':row.unrealized,'Return on Cost %':row.returnPct,'1W %':row.weekPct,'1M %':row.monthPct,'YTD %':row.ytdPct,'As Of':row.asOf}))},{name:'performance',data:performance},{name:'exposures',data:classifications},{name:'account_summary',data:accountRows()}]);
 }
 
 function render(){
@@ -447,7 +559,7 @@ function render(){
     selectionProfile=name;
     selectedTickers=new Set([...analysisRows].sort((a,b)=>b.marketValue-a.marketValue).slice(0,3).map(row=>row.ticker));
   }
-  renderKpis(analysisRows);renderCharts(analysisRows);renderPerformance();renderTable();
+  renderKpis(analysisRows);renderExposureSummary(analysisRows);renderClassificationEditor(analysisRows);renderCharts(analysisRows);renderPerformance();renderTable();
 }
 window.onProfileChange=render;
 window.onDataLoaded=render;

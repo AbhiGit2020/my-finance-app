@@ -24,6 +24,7 @@ function emptyDb() {
     stock_watchlists: [],
     stock_tracker_symbols: [],
     stock_tracker_prices: [],
+    stock_classifications: [],
     fx_rates: [],
   };
 }
@@ -236,6 +237,7 @@ function loadStockPrices() { return _db.stock_prices || []; }
 function loadStockWatchlists() { return _db.stock_watchlists || []; }
 function loadStockTrackerSymbols() { return _db.stock_tracker_symbols || []; }
 function loadStockTrackerPrices() { return _db.stock_tracker_prices || []; }
+function loadStockClassifications() { return _db.stock_classifications || []; }
 function loadFxRates() { return _db.fx_rates || []; }
 
 function saveStockTransactions(rows) { _db.stock_transactions = rows; markUnsaved(); }
@@ -244,6 +246,7 @@ function saveStockPrices(rows) { _db.stock_prices = rows; markUnsaved(); }
 function saveStockWatchlists(rows) { _db.stock_watchlists = rows; markUnsaved(); }
 function saveStockTrackerSymbols(rows) { _db.stock_tracker_symbols = rows; markUnsaved(); }
 function saveStockTrackerPrices(rows) { _db.stock_tracker_prices = rows; markUnsaved(); }
+function saveStockClassifications(rows) { _db.stock_classifications = rows; markUnsaved(); }
 function saveFxRates(rows) { _db.fx_rates = rows; markUnsaved(); }
 
 function exportToExcel(sheets) {
@@ -262,6 +265,7 @@ function exportAllData() {
     { name: 'stock_watchlists', data: loadStockWatchlists() },
     { name: 'stock_tracker_symbols', data: loadStockTrackerSymbols() },
     { name: 'stock_tracker_prices', data: loadStockTrackerPrices() },
+    { name: 'stock_classifications', data: loadStockClassifications() },
     { name: 'fx_rates', data: loadFxRates() },
   ]);
 }

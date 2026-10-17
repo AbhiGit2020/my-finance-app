@@ -20,7 +20,7 @@ const SYMBOL_ALIASES = Object.freeze({
 });
 const COLLECTIONS = [
   'portfolio_accounts', 'stock_transactions', 'stock_prices', 'stock_watchlists',
-  'stock_tracker_symbols', 'stock_tracker_prices', 'fx_rates',
+  'stock_tracker_symbols', 'stock_tracker_prices', 'stock_classifications', 'fx_rates',
 ];
 
 const MIME_TYPES = {
@@ -44,7 +44,7 @@ async function ensureDataFile() {
         schema_version: 1,
         portfolio_accounts: [],
         stock_transactions: [], stock_prices: [], stock_watchlists: [],
-        stock_tracker_symbols: [], stock_tracker_prices: [], fx_rates: [],
+        stock_tracker_symbols: [], stock_tracker_prices: [], stock_classifications: [], fx_rates: [],
       };
       await fs.writeFile(DATA_FILE, `${JSON.stringify(initial, null, 2)}\n`, 'utf8');
     }

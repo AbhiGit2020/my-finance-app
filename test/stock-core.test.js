@@ -118,11 +118,12 @@ test('opportunity classification separates stabilising pullbacks from falling pr
 });
 
 test('normalizeDatabase preserves unknown fields and fills missing collections', () => {
-  const normalized = core.normalizeDatabase({ finance_records: [{ amount: 10 }], stock_transactions: [{ txn_id: 't1' }], custom_note: 'keep me' }, 1);
+  const normalized = core.normalizeDatabase({ finance_records: [{ amount: 10 }], stock_transactions: [{ txn_id: 't1' }], stock_classifications: [{ ticker: 'AAA', asset_type: 'Stock' }], custom_note: 'keep me' }, 1);
   assert.equal(normalized.schema_version, 1);
   assert.equal(normalized.custom_note, 'keep me');
   assert.deepEqual(normalized.finance_records, [{ amount: 10 }]);
   assert.deepEqual(normalized.stock_transactions, [{ txn_id: 't1' }]);
+  assert.deepEqual(normalized.stock_classifications, [{ ticker: 'AAA', asset_type: 'Stock' }]);
   assert.deepEqual(normalized.stock_prices, []);
 });
 
