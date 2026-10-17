@@ -56,6 +56,33 @@
     return number(amount) * fxRateToSgd(currency, date, rates, defaults);
   }
 
+  function fxRateBetween(fromCurrency, toCurrency, date, rates, defaults = DEFAULT_FX_TO_SGD) {
+    const fromRate = fxRateToSgd(fromCurrency, date, rates, defaults);
+    const toRate = fxRateToSgd(toCurrency, date, rates, defaults);
+    return toRate > 0 ? fromRate / toRate : 1;
+  }
+
+  function performanceSeries(values) {
+    const baseline = (values || []).find(value => Number.isFinite(number(value)) && number(value) > 0);
+    if (!baseline) return (values || []).map(() => null);
+    let started = false;
+    return values.map(value => {
+      const current = number(value);
+      if (!started && current > 0) started = true;
+      if (!started || current <= 0) return null;
+      return ((current - baseline) / baseline) * 100;
+    });
+  }
+
+  function chainReturnSeries(periodReturns) {
+    let factor = 1;
+    return (periodReturns || []).map((value, index) => {
+      if (index === 0) return 0;
+      factor *= 1 + number(value);
+      return (factor - 1) * 100;
+    });
+  }
+
   function computeHoldings(transactions, rateResolver) {
     const positions = {};
     const realized = {};
@@ -173,5 +200,9 @@
     return merged;
   }
 
-  return { DEFAULT_FX_TO_SGD, DATA_COLLECTION_KEYS, number, latestDatedRow, fxRateToSgd, convertToSgd, computeHoldings, normalizeDatabase, mergeDatabases };
+  return {
+    DEFAULT_FX_TO_SGD, DATA_COLLECTION_KEYS, number, latestDatedRow,
+    fxRateToSgd, convertToSgd, fxRateBetween, performanceSeries, chainReturnSeries,
+    computeHoldings, normalizeDatabase, mergeDatabases,
+  };
 });

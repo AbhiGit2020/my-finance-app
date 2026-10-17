@@ -11,7 +11,13 @@ const DATA_FILE = path.join(DATA_DIR, 'data.json');
 const TEMP_FILE = path.join(DATA_DIR, 'data.json.tmp');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const SAMPLE_FILE = path.join(DATA_DIR, 'sample.json');
-const MAX_BODY_BYTES = 10 * 1024 * 1024;
+const MAX_BODY_BYTES = 50 * 1024 * 1024;
+const SYMBOL_ALIASES = Object.freeze({
+  'BRK B': { finnhub: 'BRK.B', yahoo: 'BRK-B' },
+  BASD: { finnhub: 'BAS.DE', yahoo: 'BAS.DE' },
+  BMWD: { finnhub: 'BMW.DE', yahoo: 'BMW.DE' },
+  ENGI: { finnhub: 'ENGI.PA', yahoo: 'ENGI.PA' },
+});
 const COLLECTIONS = [
   'portfolio_accounts', 'stock_transactions', 'stock_prices', 'stock_watchlists',
   'stock_tracker_symbols', 'stock_tracker_prices', 'fx_rates',
@@ -98,14 +104,84 @@ async function createBackup() {
 async function fetchQuote(url) {
   const symbol = String(url.searchParams.get('symbol') || '').trim().toUpperCase();
   const token = String(url.searchParams.get('token') || process.env.FINNHUB_API_KEY || '').trim();
-  if (!/^[A-Z0-9.:-]{1,24}$/.test(symbol)) throw new Error('Invalid ticker symbol');
+  if (!/^[A-Z0-9 .:-]{1,24}$/.test(symbol)) throw new Error('Invalid ticker symbol');
   if (!token) throw new Error('Finnhub API key is required');
   const endpoint = new URL('https://finnhub.io/api/v1/quote');
-  endpoint.searchParams.set('symbol', symbol);
+  endpoint.searchParams.set('symbol', providerSymbol(symbol, 'finnhub'));
   endpoint.searchParams.set('token', token);
   const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
   if (!response.ok) throw new Error(`Finnhub returned ${response.status}`);
   return response.json();
+}
+
+function providerSymbol(symbol, provider) {
+  return SYMBOL_ALIASES[symbol]?.[provider] || symbol;
+}
+
+function validateDate(value, label) {
+  const date = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
+    throw new Error(`Invalid ${label} date`);
+  }
+  return date;
+}
+
+function toUnixSeconds(date, addDays = 0) {
+  return Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000) + addDays * 86400;
+}
+
+async function fetchFinnhubHistory(symbol, from, to, token) {
+  if (!token) return [];
+  const endpoint = new URL('https://finnhub.io/api/v1/stock/candle');
+  endpoint.searchParams.set('symbol', providerSymbol(symbol, 'finnhub'));
+  endpoint.searchParams.set('resolution', 'D');
+  endpoint.searchParams.set('from', String(toUnixSeconds(from)));
+  endpoint.searchParams.set('to', String(toUnixSeconds(to, 1)));
+  endpoint.searchParams.set('token', token);
+  const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+  if (!response.ok) return [];
+  const data = await response.json();
+  if (data.s !== 'ok' || !Array.isArray(data.t) || !Array.isArray(data.c)) return [];
+  return data.t.map((timestamp, index) => ({
+    date: new Date(timestamp * 1000).toISOString().slice(0, 10),
+    close: Number(data.c[index]),
+  })).filter(row => Number.isFinite(row.close) && row.close > 0);
+}
+
+async function fetchYahooHistory(symbol, from, to) {
+  const endpoint = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(providerSymbol(symbol, 'yahoo'))}`);
+  endpoint.searchParams.set('period1', String(toUnixSeconds(from)));
+  endpoint.searchParams.set('period2', String(toUnixSeconds(to, 1)));
+  endpoint.searchParams.set('interval', '1d');
+  endpoint.searchParams.set('events', 'history');
+  const response = await fetch(endpoint, {
+    headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 StockAnalysisLocal/1.0' },
+  });
+  if (!response.ok) throw new Error(`Historical price provider returned ${response.status}`);
+  const result = (await response.json())?.chart?.result?.[0];
+  const timestamps = result?.timestamp || [];
+  const closes = result?.indicators?.quote?.[0]?.close || [];
+  return timestamps.map((timestamp, index) => ({
+    date: new Date(timestamp * 1000).toISOString().slice(0, 10),
+    close: Number(closes[index]),
+  })).filter(row => Number.isFinite(row.close) && row.close > 0);
+}
+
+async function fetchHistory(url) {
+  const symbol = String(url.searchParams.get('symbol') || '').trim().toUpperCase();
+  if (!/^[A-Z0-9 .:-]{1,24}$/.test(symbol)) throw new Error('Invalid ticker symbol');
+  const from = validateDate(url.searchParams.get('from'), 'from');
+  const to = validateDate(url.searchParams.get('to'), 'to');
+  if (from > to) throw new Error('History start date must be before end date');
+  const token = String(url.searchParams.get('token') || process.env.FINNHUB_API_KEY || '').trim();
+  let candles = await fetchFinnhubHistory(symbol, from, to, token).catch(() => []);
+  let source = 'finnhub';
+  if (!candles.length) {
+    candles = await fetchYahooHistory(symbol, from, to);
+    source = 'yahoo';
+  }
+  if (!candles.length) throw new Error(`No historical prices found for ${symbol}`);
+  return { symbol, source, candles };
 }
 
 async function serveStatic(url, res) {
@@ -140,6 +216,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/quote') {
       return sendJson(res, 200, await fetchQuote(url));
+    }
+    if (req.method === 'GET' && url.pathname === '/api/history') {
+      return sendJson(res, 200, await fetchHistory(url));
     }
     if (req.method === 'GET' && await serveStatic(url, res)) return;
     sendJson(res, 404, { error: 'Not found' });

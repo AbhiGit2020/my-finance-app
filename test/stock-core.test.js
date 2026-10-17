@@ -48,6 +48,27 @@ test('dated FX uses the latest rate on or before the transaction date', () => {
   assert.equal(core.fxRateToSgd('SGD', '2025-04-01', rates), 1);
 });
 
+test('cross currency rate converts portfolio values to USD', () => {
+  const rates = [
+    { currency: 'USD', asof_date: '2025-01-01', rate_to_sgd: 1.35 },
+    { currency: 'EUR', asof_date: '2025-01-01', rate_to_sgd: 1.485 },
+  ];
+  assert.equal(core.fxRateBetween('USD', 'USD', '2025-06-01', rates), 1);
+  assert.equal(core.fxRateBetween('EUR', 'USD', '2025-06-01', rates), 1.1);
+});
+
+test('performance series starts at zero and ignores leading empty values', () => {
+  assert.deepEqual(core.performanceSeries([0, 100, 110, 90]), [null, 0, 10, -10]);
+  assert.deepEqual(core.performanceSeries([0, 0]), [null, null]);
+});
+
+test('chain return series compounds period returns without treating cash flows as gains', () => {
+  const result = core.chainReturnSeries([0, 0.1, -0.05]);
+  assert.equal(result[0], 0);
+  assert.ok(Math.abs(result[1] - 10) < 1e-9);
+  assert.ok(Math.abs(result[2] - 4.5) < 1e-9);
+});
+
 test('normalizeDatabase preserves unknown fields and fills missing collections', () => {
   const normalized = core.normalizeDatabase({ finance_records: [{ amount: 10 }], stock_transactions: [{ txn_id: 't1' }], custom_note: 'keep me' }, 1);
   assert.equal(normalized.schema_version, 1);

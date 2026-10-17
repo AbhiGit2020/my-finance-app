@@ -216,6 +216,13 @@ async function fetchLocalQuote(symbol) {
   return apiRequest(`/api/quote?symbol=${encodeURIComponent(symbol)}&token=${encodeURIComponent(key)}`);
 }
 
+async function fetchLocalHistory(symbol, from, to) {
+  const key = (localStorage.getItem(SS_FINNHUB) || '').trim();
+  const params = new URLSearchParams({ symbol, from, to });
+  if (key) params.set('token', key);
+  return apiRequest(`/api/history?${params}`);
+}
+
 function loadStockTransactions() { return _db.stock_transactions || []; }
 function loadPortfolioAccounts() { return _db.portfolio_accounts || []; }
 function loadStockPrices() { return _db.stock_prices || []; }
@@ -292,6 +299,10 @@ function importJsonBackup() {
 
 function appFxToSgd(currency, date) {
   return StockCore.fxRateToSgd(currency, date, loadFxRates(), STOCK_FX_TO_SGD);
+}
+
+function appFxToUsd(currency, date) {
+  return StockCore.fxRateBetween(currency, 'USD', date, loadFxRates(), STOCK_FX_TO_SGD);
 }
 
 function latestStockPrice(profile, ticker) {

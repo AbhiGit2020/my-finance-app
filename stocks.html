@@ -11,12 +11,22 @@
 
 <style>
 .chart-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; }
-.chart-title { font-size:0.88rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; }
+.chart-title { font-size:0.88rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0; margin-bottom:12px; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .chart-wrap { position:relative; height:300px; }
-.toggle-group { display:flex; gap:6px; }
+.chart-controls { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.toggle-group { display:flex; gap:3px; padding:3px; border:1px solid var(--border); border-radius:7px; background:var(--bg3); }
 .toggle-btn { background:var(--bg3); border:1px solid var(--border); color:var(--text-muted); border-radius:6px; padding:4px 12px; font-size:0.78rem; font-weight:600; cursor:pointer; transition:all 0.15s; }
 .toggle-btn.active { background:var(--teal); border-color:var(--teal); color:#fff; }
 .chart-loading { text-align:center; padding:40px; color:var(--text-muted); font-size:0.88rem; }
+.sort-header { display:inline-flex; align-items:center; justify-content:flex-end; gap:5px; width:100%; padding:0; border:0; background:none; color:inherit; font:inherit; text-transform:inherit; cursor:pointer; white-space:nowrap; }
+th:first-child .sort-header { justify-content:flex-start; }
+.sort-header:hover, .sort-header:focus-visible { color:var(--text); }
+.sort-indicator { width:10px; color:var(--teal); }
+@media (max-width:768px) {
+  .chart-title { flex-direction:column; }
+  .chart-controls { justify-content:flex-start; }
+  .toggle-btn { padding:5px 9px; }
+}
 </style>
 </head>
 <body>
@@ -137,10 +147,24 @@
   <!-- Portfolio Value Chart -->
   <div class="chart-card">
     <div class="chart-title">
-      <span>📈 Portfolio Performance</span>
-      <div class="toggle-group">
-        <button class="toggle-btn active" id="toggleTotal" onclick="window.setChartMode&&window.setChartMode('total')">Total Value</button>
-        <button class="toggle-btn" id="toggleStocks" onclick="window.setChartMode&&window.setChartMode('stocks')">By Stock</button>
+      <span>Portfolio Performance</span>
+      <div class="chart-controls">
+        <div class="toggle-group" aria-label="Chart scope">
+          <button class="toggle-btn active" id="togglePortfolio" onclick="setChartScope('portfolio')">Portfolio</button>
+          <button class="toggle-btn" id="toggleStocks" onclick="setChartScope('stocks')">Stocks</button>
+        </div>
+        <div class="toggle-group" aria-label="Chart measure">
+          <button class="toggle-btn active" id="toggleValue" onclick="setChartMeasure('value')">Value</button>
+          <button class="toggle-btn" id="togglePerformance" onclick="setChartMeasure('performance')">Performance %</button>
+        </div>
+        <div class="toggle-group" aria-label="Chart period">
+          <button class="toggle-btn" data-range="all" onclick="setChartRange('all')">All</button>
+          <button class="toggle-btn active" data-range="ytd" onclick="setChartRange('ytd')">YTD</button>
+          <button class="toggle-btn" data-range="6m" onclick="setChartRange('6m')">6M</button>
+          <button class="toggle-btn" data-range="3m" onclick="setChartRange('3m')">3M</button>
+          <button class="toggle-btn" data-range="1m" onclick="setChartRange('1m')">1M</button>
+          <button class="toggle-btn" data-range="1w" onclick="setChartRange('1w')">1W</button>
+        </div>
       </div>
     </div>
     <div id="chartLoading" class="chart-loading">Click "📈 Fetch Prices" first, then the chart will appear here.</div>
@@ -194,6 +218,7 @@ function toast(msg,type='success'){
 }
 function fmt(n,dec=2){ return Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:dec,maximumFractionDigits:dec}); }
 function fmtN(n){ return fmt(n,0); }
+function fmtUsd(n,dec=0){ return `US$ ${fmt(n,dec)}`; }
 function pct(a,b){ if(!b) return 0; return (a-b)/b*100; }
 
 function profile(){ return getActiveProfile(); }
@@ -260,19 +285,13 @@ async function retirePortfolioAccount(){
 
 // ── Holdings computation ──────────────────────────────────
 function computeHoldings(txns){
-  return StockCore.computeHoldings(txns, (currency, date) => appFxToSgd(currency, date));
+  return StockCore.computeHoldings(txns, (currency, date) => appFxToUsd(currency, date));
 }
 
 // ── Finnhub API ───────────────────────────────────────────
 // stock_prices holds a dated snapshot per (profile,ticker,asof_date) rather
 // than a single overwritten row, so weekly/monthly/YTD reference prices are
 // derived from real history instead of all being "previous close".
-async function fetchOneTicker(ticker) {
-  const quote = await fetchLocalQuote(ticker);
-  if (!quote.c) throw new Error('no price data');
-  return { asof_date: new Date().toISOString().slice(0, 10), close: quote.c };
-}
-
 function todayMinusDays(days) {
   return new Date(Date.now() - days*24*3600*1000).toISOString().slice(0,10);
 }
@@ -286,37 +305,105 @@ function upsertStockSnapshot(prices, ticker, date, close, source) {
   return kept;
 }
 
+async function mapWithConcurrency(items, concurrency, worker) {
+  let index = 0;
+  const runners = Array.from({length:Math.min(concurrency,items.length)}, async()=>{
+    while(index<items.length){
+      const current=index++;
+      await worker(items[current],current);
+    }
+  });
+  await Promise.all(runners);
+}
+
 async function fetchPrices() {
   const txns = loadStockTransactions().filter(r => r.profile === profile());
   const { holdings } = computeHoldings(txns);
   if (!holdings.length) { toast('No holdings to fetch prices for', 'error'); return; }
 
   const btn = document.getElementById('fetchBtn');
-  btn.disabled = true; btn.textContent = '⏳ Fetching…';
+  btn.disabled = true; btn.textContent = 'Fetching prices...';
 
   let prices  = loadStockPrices();
   const tickers = [...new Set(holdings.map(h => h.ticker))];
-  let fetched = 0, failed = [];
+  const firstTxnDate = txns.reduce((min,row)=>!min||row.date<min?row.date:min,'');
+  const today = new Date().toISOString().slice(0,10);
+  const hasFinnhubKey=Boolean((localStorage.getItem('hf_finnhub_key')||'').trim());
+  let fetched = 0, completed = 0, failed = [];
 
-  for (const ticker of tickers) {
+  await mapWithConcurrency(tickers,4,async ticker=>{
     try {
-      const result = await fetchOneTicker(ticker);
-      prices = upsertStockSnapshot(prices, ticker, result.asof_date, result.close, 'finnhub');
+      const existing = prices.filter(p=>p.profile===profile()&&p.ticker===ticker).sort((a,b)=>a.asof_date.localeCompare(b.asof_date));
+      const historyFrom = existing.length>5 ? todayMinusDays(14) : firstTxnDate;
+      const history = await fetchLocalHistory(ticker,historyFrom,today);
+      history.candles.forEach(candle=>{
+        prices=upsertStockSnapshot(prices,ticker,candle.date,candle.close,history.source);
+      });
+      try {
+        if(!hasFinnhubKey)throw new Error('Finnhub key not configured');
+        const quote=await fetchLocalQuote(ticker);
+        if(quote.c) prices=upsertStockSnapshot(prices,ticker,today,quote.c,'finnhub');
+      } catch(error) {
+        console.info(`Current quote unavailable for ${ticker}; using latest daily close.`,error);
+      }
       fetched++;
     } catch(e) {
       failed.push(ticker);
+      console.error(`Price history failed for ${ticker}:`,e);
+    } finally {
+      completed++;
+      btn.textContent=`Fetching ${completed}/${tickers.length}`;
     }
-  }
+  });
 
   saveStockPrices(prices);
-  btn.disabled = false; btn.textContent = '🔄 Fetch Prices';
-  if (failed.length) toast(`Fetched ${fetched}. Failed: ${failed.join(', ')} — check ticker symbol or use Manual Entry.`, 'info');
-  else toast(`Prices updated for ${fetched} ticker(s) ✓`);
+  await localSave();
+  btn.disabled = false; btn.textContent = 'Fetch Prices';
+  if (failed.length) toast(`Updated ${fetched}. Failed: ${failed.join(', ')}. Check the ticker or use Manual Entry.`, 'info');
+  else toast(`Price history updated for ${fetched} ticker(s)`);
   render();
   buildPortfolioChart();
 }
 
 // ── Render KPIs + holdings ────────────────────────────────
+const HOLDING_COLUMNS=[
+  {key:'ticker',label:'Ticker',type:'text'},
+  {key:'qty',label:'Qty',type:'number'},
+  {key:'currency',label:'CCY',type:'text'},
+  {key:'avg_cost',label:'Avg Cost USD',type:'number'},
+  {key:'close',label:'Close',type:'number'},
+  {key:'close_usd',label:'Close USD',type:'number'},
+  {key:'market_value',label:'Market Value USD',type:'number'},
+  {key:'unrealized_pnl',label:'Unrealized P&L',type:'number'},
+  {key:'realized_pnl',label:'Realized P&L',type:'number'},
+  {key:'weekly_pct',label:'Wk %',type:'number'},
+  {key:'monthly_pct',label:'Mo %',type:'number'},
+  {key:'ytd_pct',label:'YTD %',type:'number'},
+  {key:'total_return_pct',label:'Return %',type:'number'},
+  {key:'asof_date',label:'As Of',type:'text'},
+];
+let holdingsSort={key:'ticker',direction:'asc'};
+
+function setHoldingsSort(key){
+  holdingsSort=holdingsSort.key===key
+    ? {key,direction:holdingsSort.direction==='asc'?'desc':'asc'}
+    : {key,direction:'asc'};
+  render();
+}
+
+function sortHoldingRows(rows){
+  const column=HOLDING_COLUMNS.find(item=>item.key===holdingsSort.key)||HOLDING_COLUMNS[0];
+  const multiplier=holdingsSort.direction==='asc'?1:-1;
+  return [...rows].sort((left,right)=>{
+    const a=left[column.key],b=right[column.key];
+    if(a==null&&b==null)return String(left.ticker).localeCompare(String(right.ticker));
+    if(a==null)return 1;
+    if(b==null)return -1;
+    const result=column.type==='number'?Number(a)-Number(b):String(a).localeCompare(String(b),undefined,{numeric:true,sensitivity:'base'});
+    return result===0?String(left.ticker).localeCompare(String(right.ticker)):result*multiplier;
+  });
+}
+
 function render(){
   const txns=loadStockTransactions().filter(r=>r.profile===profile());
   const {holdings,realRows}=computeHoldings(txns);
@@ -327,58 +414,66 @@ function render(){
   const rows=holdings.map(h=>{
     const latest=latestStockPrice(profile(),h.ticker);
     const close=parseFloat(latest?.close)||0;
-    const closeSgd=close*appFxToSgd(h.currency, latest?.asof_date);
+    const closeUsd=close*appFxToUsd(h.currency, latest?.asof_date);
     const wkSnap=stockPriceAsOf(profile(),h.ticker,wkDate);
     const moSnap=stockPriceAsOf(profile(),h.ticker,moDate);
     const ytdSnap=stockPriceAsOf(profile(),h.ticker,ytdDate);
-    const wkRef=wkSnap?parseFloat(wkSnap.close)||close:close;
-    const moRef=moSnap?parseFloat(moSnap.close)||close:close;
-    const ytdRef=ytdSnap?parseFloat(ytdSnap.close)||close:close;
+    const wkRef=wkSnap?parseFloat(wkSnap.close)||null:null;
+    const moRef=moSnap?parseFloat(moSnap.close)||null:null;
+    const ytdRef=ytdSnap?parseFloat(ytdSnap.close)||null:null;
     return {
-      ...h, close, close_sgd:closeSgd, wk_ref:wkRef, mo_ref:moRef, ytd_ref:ytdRef,
+      ...h, close, close_usd:closeUsd, wk_ref:wkRef, mo_ref:moRef, ytd_ref:ytdRef,
       asof_date:latest?.asof_date||'',
-      market_value:h.qty*closeSgd,
-      unrealized_pnl:(closeSgd-h.avg_cost)*h.qty,
-      weekly_pct:pct(close,wkRef),
-      monthly_pct:pct(close,moRef),
-      ytd_pct:pct(close,ytdRef),
-      total_return_pct:pct(closeSgd,h.avg_cost),
+      market_value:h.qty*closeUsd,
+      unrealized_pnl:(closeUsd-h.avg_cost)*h.qty,
+      weekly_pct:wkRef?pct(close,wkRef):null,
+      monthly_pct:moRef?pct(close,moRef):null,
+      ytd_pct:ytdRef?pct(close,ytdRef):null,
+      total_return_pct:h.avg_cost?pct(closeUsd,h.avg_cost):null,
     };
   });
 
   const totalMV=rows.reduce((s,r)=>s+r.market_value,0);
   const totalUnrealized=rows.reduce((s,r)=>s+r.unrealized_pnl,0);
   const wMV=r=>r.market_value;
-  const wavg=(fn)=>{const denom=rows.reduce((s,r)=>s+wMV(r),0);if(!denom)return 0;return rows.reduce((s,r)=>s+fn(r)*wMV(r),0)/denom;};
+  const wavg=(fn)=>{const valid=rows.filter(r=>fn(r)!=null);const denom=valid.reduce((s,r)=>s+wMV(r),0);if(!denom)return null;return valid.reduce((s,r)=>s+fn(r)*wMV(r),0)/denom;};
+  const signedKpi=(label,value)=>({label,val:value==null?'—':`${fmt(value,1)}%`,cls:value==null?'neutral':value>=0?'pos':'neg'});
+  const weekly=wavg(r=>r.weekly_pct),monthly=wavg(r=>r.monthly_pct),ytd=wavg(r=>r.ytd_pct),totalReturn=wavg(r=>r.total_return_pct);
 
   // KPIs
   const kpiGrid=document.getElementById('stockKPIs');
   const kpis=[
-    {label:'Portfolio Value',val:`S$ ${fmtN(totalMV)}`,cls:'neutral'},
-    {label:'Weekly %',val:`${fmt(wavg(r=>r.weekly_pct),1)}%`,cls:wavg(r=>r.weekly_pct)>=0?'pos':'neg'},
-    {label:'Monthly %',val:`${fmt(wavg(r=>r.monthly_pct),1)}%`,cls:wavg(r=>r.monthly_pct)>=0?'pos':'neg'},
-    {label:'YTD %',val:`${fmt(wavg(r=>r.ytd_pct),1)}%`,cls:wavg(r=>r.ytd_pct)>=0?'pos':'neg'},
-    {label:'Total Return %',val:`${fmt(wavg(r=>r.total_return_pct),1)}%`,cls:wavg(r=>r.total_return_pct)>=0?'pos':'neg'},
-    {label:'Unrealized P&L',val:`S$ ${fmtN(totalUnrealized)}`,cls:totalUnrealized>=0?'pos':'neg'},
+    {label:'Portfolio Value',val:fmtUsd(totalMV),cls:'neutral'},
+    signedKpi('Weekly %',weekly),
+    signedKpi('Monthly %',monthly),
+    signedKpi('YTD %',ytd),
+    signedKpi('Total Return %',totalReturn),
+    {label:'Unrealized P&L',val:fmtUsd(totalUnrealized),cls:totalUnrealized>=0?'pos':'neg'},
   ];
   kpiGrid.innerHTML=kpis.map(k=>`<div class="kpi ${k.cls==='neutral'?'teal':k.cls==='pos'?'green':'red'}"><div class="kpi-label">${k.label}</div><div class="kpi-value ${k.cls}">${k.val}</div></div>`).join('');
 
   // Holdings table
-  const cols=['Ticker','Qty','CCY','Avg Cost S$','Close','Close S$','Mkt Value S$','Unrealized P&L','Realized P&L','Wk%','Mo%','YTD%','Return%','As Of'];
-  let html=`<thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
+  const sortedRows=sortHoldingRows(rows);
+  let html=`<thead><tr>${HOLDING_COLUMNS.map(column=>{
+    const active=holdingsSort.key===column.key;
+    const direction=active?holdingsSort.direction:'none';
+    const indicator=active?(holdingsSort.direction==='asc'?'↑':'↓'):'';
+    return `<th aria-sort="${direction==='asc'?'ascending':direction==='desc'?'descending':'none'}"><button class="sort-header" onclick="setHoldingsSort('${column.key}')">${column.label}<span class="sort-indicator">${indicator}</span></button></th>`;
+  }).join('')}</tr></thead><tbody>`;
   if(!rows.length) html+='<tr><td colspan="14" class="text-muted" style="text-align:center;padding:20px">No holdings. Add a BUY transaction above.</td></tr>';
-  rows.forEach(r=>{
+  sortedRows.forEach(r=>{
     const pctCls=(v)=>v>0?'pos':v<0?'neg':'';
+    const pctValue=(v)=>v==null?'—':`${fmt(v,1)}%`;
     html+=`<tr>
       <td class="bold">${escapeHtml(r.ticker)}</td>
-      <td>${fmt(r.qty,4)}</td><td>${escapeHtml(r.currency)}</td><td>${fmt(r.avg_cost)}</td><td>${fmt(r.close)}</td><td>${fmt(r.close_sgd)}</td>
+      <td>${fmt(r.qty,4)}</td><td>${escapeHtml(r.currency)}</td><td>${fmt(r.avg_cost)}</td><td>${fmt(r.close)}</td><td>${fmt(r.close_usd)}</td>
       <td class="bold">${fmtN(r.market_value)}</td>
       <td class="${pctCls(r.unrealized_pnl)}">${fmt(r.unrealized_pnl)}</td>
       <td class="${pctCls(r.realized_pnl)}">${fmt(r.realized_pnl)}</td>
-      <td class="${pctCls(r.weekly_pct)}">${fmt(r.weekly_pct,1)}%</td>
-      <td class="${pctCls(r.monthly_pct)}">${fmt(r.monthly_pct,1)}%</td>
-      <td class="${pctCls(r.ytd_pct)}">${fmt(r.ytd_pct,1)}%</td>
-      <td class="${pctCls(r.total_return_pct)}">${fmt(r.total_return_pct,1)}%</td>
+      <td class="${pctCls(r.weekly_pct)}">${pctValue(r.weekly_pct)}</td>
+      <td class="${pctCls(r.monthly_pct)}">${pctValue(r.monthly_pct)}</td>
+      <td class="${pctCls(r.ytd_pct)}">${pctValue(r.ytd_pct)}</td>
+      <td class="${pctCls(r.total_return_pct)}">${pctValue(r.total_return_pct)}</td>
       <td class="text-muted" style="font-size:0.8rem">${escapeHtml(r.asof_date)}</td>
     </tr>`;
   });
@@ -386,7 +481,7 @@ function render(){
   document.getElementById('holdingsTable').innerHTML=html;
 
   // Realized table
-  let rHTML='<thead><tr><th>Ticker</th><th>Realized P&L</th><th>Open Qty</th></tr></thead><tbody>';
+  let rHTML='<thead><tr><th>Ticker</th><th>Realized P&L USD</th><th>Open Qty</th></tr></thead><tbody>';
   if(!realRows.length) rHTML+='<tr><td colspan="3" class="text-muted" style="text-align:center;padding:14px">No realized gains/losses yet</td></tr>';
   realRows.forEach(r=>{rHTML+=`<tr><td class="bold">${escapeHtml(r.ticker)}</td><td class="${r.realized_pnl>=0?'pos':'neg'}">${fmt(r.realized_pnl)}</td><td>${fmt(r.open_qty,4)}</td></tr>`;});
   rHTML+='</tbody>';
@@ -569,14 +664,48 @@ function exportStocksExcel(){
 
 // ── Portfolio Chart ───────────────────────────────────────
 window.portfolioChart = null;
-window.chartMode = 'total';
+window.chartScope = 'portfolio';
+window.chartMeasure = 'value';
+window.chartRange = 'ytd';
 window.chartDataCache = null;
 
-function setChartMode(mode) {
-  window.chartMode = mode;
-  document.getElementById('toggleTotal').classList.toggle('active', mode==='total');
-  document.getElementById('toggleStocks').classList.toggle('active', mode==='stocks');
+function setChartScope(scope) {
+  window.chartScope=scope;
+  document.getElementById('togglePortfolio').classList.toggle('active',scope==='portfolio');
+  document.getElementById('toggleStocks').classList.toggle('active',scope==='stocks');
   if (window.chartDataCache) renderPortfolioChart(window.chartDataCache);
+}
+
+function setChartMeasure(measure) {
+  window.chartMeasure=measure;
+  document.getElementById('toggleValue').classList.toggle('active',measure==='value');
+  document.getElementById('togglePerformance').classList.toggle('active',measure==='performance');
+  if(window.chartDataCache)renderPortfolioChart(window.chartDataCache);
+}
+
+function setChartRange(range) {
+  window.chartRange=range;
+  document.querySelectorAll('[data-range]').forEach(button=>button.classList.toggle('active',button.dataset.range===range));
+  if(window.chartDataCache)renderPortfolioChart(window.chartDataCache);
+}
+
+function chartRangeStart(range,endDate){
+  if(range==='all')return '';
+  const end=new Date(`${endDate}T00:00:00Z`);
+  if(range==='ytd')return `${end.getUTCFullYear()}-01-01`;
+  const days={"1w":7,"1m":30,"3m":90,"6m":180}[range]||0;
+  end.setUTCDate(end.getUTCDate()-days);
+  return end.toISOString().slice(0,10);
+}
+
+function priceFromSeries(series,dateStr){
+  let low=0,high=series.length-1,best=null;
+  while(low<=high){
+    const middle=Math.floor((low+high)/2);
+    if(series[middle].asof_date<=dateStr){best=series[middle];low=middle+1;}
+    else high=middle-1;
+  }
+  return best;
 }
 
 function buildPortfolioChart() {
@@ -601,71 +730,84 @@ function buildPortfolioChart() {
     return;
   }
 
-  const { holdings } = computeHoldings(txns);
-  if (!holdings.length) return;
-
-  const tickers = [...new Set(holdings.map(h => h.ticker))];
-
-  // Build chart using stored price snapshots per ticker
-  // Each price record has asof_date, close, wk_ref, mo_ref, ytd_ref
-  // We construct timeline: ytd start, 1-month ago, 1-week ago, today
+  const transactionTickers=[...new Set(txns.map(row=>String(row.ticker||'').trim().toUpperCase()).filter(Boolean))];
+  const tickers=transactionTickers.filter(ticker=>storedPrices.some(row=>String(row.ticker||'').trim().toUpperCase()===ticker)).sort();
   const today = new Date().toISOString().slice(0,10);
   const sortedTxns = [...txns].sort((a,b) => new Date(a.date)-new Date(b.date));
   const firstDate = sortedTxns[0]?.date || today;
+  const priceSeries=Object.fromEntries(tickers.map(ticker=>[
+    ticker,
+    storedPrices.filter(row=>String(row.ticker||'').trim().toUpperCase()===ticker).sort((a,b)=>a.asof_date.localeCompare(b.asof_date)),
+  ]));
+  const tickerCurrency={};
+  sortedTxns.forEach(row=>{tickerCurrency[String(row.ticker||'').trim().toUpperCase()]=row.currency||'USD';});
 
   function holdingsAtDate(dateStr) {
     const { holdings: datedHoldings } = computeHoldings(sortedTxns.filter(t => t.date <= dateStr));
     return Object.fromEntries(datedHoldings.map(holding => [holding.ticker, holding]));
   }
 
-  // Timeline points: buy dates + reference points, all sorted
-  const buyDates = [...new Set(txns.map(t=>t.date))].sort();
-  const latestAsof = storedPrices.reduce((max,p)=>p.asof_date>max?p.asof_date:max, storedPrices[0].asof_date);
-  const curYear = new Date().getFullYear();
-  const ytdDate = `${curYear}-01-01`;
-  const moDate  = moRefDate();
-  const wkDate  = wkRefDate();
+  const allDates=[...new Set([...storedPrices.map(row=>row.asof_date),...txns.map(row=>row.date)])]
+    .filter(date=>date>=firstDate&&date<=today).sort();
+  if(!allDates.length){
+    if(chartLoading){chartLoading.style.display='block';chartLoading.textContent='No dated prices are available for this portfolio.';}
+    return;
+  }
 
-  const allDates = [...new Set([...buyDates, ytdDate, moDate, wkDate, latestAsof])].sort().filter(d => d >= firstDate);
-
-  // Value at each date uses the real snapshot closest to (and not after) that
-  // date for every ticker — not a single reused reference price.
   function portfolioValueAtDate(dateStr) {
     const pos = holdingsAtDate(dateStr);
     let total = 0;
-    const byStock = {};
+    const byStock = {},byStockPrice={};
     tickers.forEach(ticker => {
+      const snap=priceFromSeries(priceSeries[ticker],dateStr);
+      if(!snap){byStock[ticker]=0;byStockPrice[ticker]=0;return;}
+      const price=(parseFloat(snap.close)||0)*appFxToUsd(tickerCurrency[ticker],snap.asof_date);
+      byStockPrice[ticker]=price;
       const qty = pos[ticker]?.qty || 0;
       if (qty <= 0) { byStock[ticker] = 0; return; }
-      const snap = stockPriceAsOf(profile(), ticker, dateStr);
-      if (!snap) { byStock[ticker] = 0; return; }
-      const price = parseFloat(snap.close) || 0;
-      const val = qty * price * appFxToSgd(pos[ticker]?.currency, snap.asof_date);
+      const val = qty * price;
       byStock[ticker] = val;
       total += val;
     });
-    return { total, byStock };
+    return { total, byStock, byStockPrice };
+  }
+
+  function positionValueAtDate(positions,dateStr){
+    return Object.entries(positions).reduce((total,[ticker,holding])=>{
+      if(holding.qty<=0||!priceSeries[ticker])return total;
+      const snap=priceFromSeries(priceSeries[ticker],dateStr);
+      if(!snap)return total;
+      const price=(parseFloat(snap.close)||0)*appFxToUsd(holding.currency,snap.asof_date);
+      return total+holding.qty*price;
+    },0);
   }
 
   const totalValues = [];
-  const stockDatasets = {};
-  tickers.forEach(t => stockDatasets[t] = []);
+  const stockValues = {},stockPrices={};
+  tickers.forEach(t=>{stockValues[t]=[];stockPrices[t]=[];});
 
   allDates.forEach(dateStr => {
-    const { total, byStock } = portfolioValueAtDate(dateStr);
+    const {total,byStock,byStockPrice}=portfolioValueAtDate(dateStr);
     totalValues.push(total);
-    tickers.forEach(t => stockDatasets[t].push(byStock[t] || 0));
+    tickers.forEach(t=>{stockValues[t].push(byStock[t]||0);stockPrices[t].push(byStockPrice[t]||0);});
+  });
+  const portfolioPeriodReturns=allDates.map((dateStr,index)=>{
+    if(index===0)return 0;
+    const priorPositions=holdingsAtDate(allDates[index-1]);
+    const openingValue=positionValueAtDate(priorPositions,allDates[index-1]);
+    const closingValue=positionValueAtDate(priorPositions,dateStr);
+    return openingValue>0?closingValue/openingValue-1:0;
   });
 
-  // Filter out zero-value dates at start
   let startIdx = 0;
   while (startIdx < totalValues.length - 1 && totalValues[startIdx] === 0) startIdx++;
   const trimDates  = allDates.slice(startIdx);
   const trimTotal  = totalValues.slice(startIdx);
-  const trimStocks = {};
-  tickers.forEach(t => trimStocks[t] = stockDatasets[t].slice(startIdx));
+  const trimReturns=portfolioPeriodReturns.slice(startIdx);
+  const trimValues={},trimPrices={};
+  tickers.forEach(t=>{trimValues[t]=stockValues[t].slice(startIdx);trimPrices[t]=stockPrices[t].slice(startIdx);});
 
-  window.chartDataCache = { allDates: trimDates, totalValues: trimTotal, stockDatasets: trimStocks, tickers };
+  window.chartDataCache={allDates:trimDates,totalValues:trimTotal,portfolioPeriodReturns:trimReturns,stockValues:trimValues,stockPrices:trimPrices,tickers};
   document.getElementById('chartLoading').style.display = 'none';
   document.getElementById('chartWrap').style.display = 'block';
   document.getElementById('stockPerformance').style.display = 'block';
@@ -675,17 +817,30 @@ function buildPortfolioChart() {
 const CHART_COLORS = ['#068a91','#3fb950','#d29922','#f85149','#a371f7','#58a6ff','#fb8500','#2dc653'];
 
 function renderPortfolioChart(data) {
-  const { allDates, totalValues, stockDatasets, tickers } = data;
+  const {allDates,totalValues,portfolioPeriodReturns,stockValues,stockPrices,tickers}=data;
   if (window.portfolioChart) portfolioChart.destroy();
 
+  const rangeStart=chartRangeStart(window.chartRange,allDates[allDates.length-1]);
+  let startIndex=rangeStart?allDates.findIndex(date=>date>=rangeStart):0;
+  if(startIndex<0)startIndex=Math.max(0,allDates.length-1);
+  const visibleDates=allDates.slice(startIndex);
+  const visibleTotal=totalValues.slice(startIndex);
+  const visiblePortfolioReturns=portfolioPeriodReturns.slice(startIndex);
+  const visibleValues={},visiblePrices={};
+  tickers.forEach(ticker=>{
+    visibleValues[ticker]=stockValues[ticker].slice(startIndex);
+    visiblePrices[ticker]=stockPrices[ticker].slice(startIndex);
+  });
   const ctx = document.getElementById('portfolioChart');
-  const labels = allDates.map(d => { const dt = new Date(d); return dt.toLocaleDateString('en-SG',{month:'short',year:'2-digit'}); });
+  const compactRange=['1w','1m','3m','6m'].includes(window.chartRange);
+  const labels=visibleDates.map(date=>new Date(`${date}T00:00:00Z`).toLocaleDateString('en-SG',compactRange?{day:'numeric',month:'short'}:{month:'short',year:'2-digit'}));
+  const performance=window.chartMeasure==='performance';
 
   let datasets;
-  if (window.chartMode === 'total') {
+  if(window.chartScope==='portfolio'){
     datasets = [{
-      label: 'Total Portfolio Value',
-      data: totalValues,
+      label: performance?'Portfolio Performance':'Portfolio Value',
+      data:performance?StockCore.chainReturnSeries(visiblePortfolioReturns):visibleTotal,
       borderColor: '#068a91',
       backgroundColor: 'rgba(6,138,145,0.12)',
       borderWidth: 2.5,
@@ -697,7 +852,7 @@ function renderPortfolioChart(data) {
   } else {
     datasets = tickers.map((ticker, i) => ({
       label: ticker,
-      data: stockDatasets[ticker],
+      data:performance?StockCore.performanceSeries(visiblePrices[ticker]):visibleValues[ticker],
       borderColor: CHART_COLORS[i % CHART_COLORS.length],
       backgroundColor: 'transparent',
       borderWidth: 2,
@@ -718,30 +873,33 @@ function renderPortfolioChart(data) {
         legend: { labels: { color: '#8b949e', font: { size: 11 } } },
         tooltip: {
           callbacks: {
-            label: ctx => ` ${ctx.dataset.label}: S$ ${Number(ctx.raw).toLocaleString('en-SG', {minimumFractionDigits:0,maximumFractionDigits:0})}`
+            label:ctx=>performance
+              ?` ${ctx.dataset.label}: ${Number(ctx.raw).toFixed(2)}%`
+              :` ${ctx.dataset.label}: ${fmtUsd(ctx.raw)}`
           }
         }
       },
       scales: {
         x: { ticks: { color: '#8b949e', maxTicksLimit: 12 }, grid: { color: 'rgba(255,255,255,0.05)' } },
-        y: { ticks: { color: '#8b949e', callback: v => 'S$' + Number(v).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0}) }, grid: { color: 'rgba(255,255,255,0.05)' } }
+        y:{ticks:{color:'#8b949e',callback:value=>performance?`${Number(value).toFixed(0)}%`:fmtUsd(value)},grid:{color:'rgba(255,255,255,0.05)'}}
       }
     }
   });
 
-  // Stock performance table
-  renderStockPerformance(data);
+  renderStockPerformance({totalValues:visibleTotal,stockValues:visibleValues,stockPrices:visiblePrices,tickers});
 }
 
 function renderStockPerformance(data) {
-  const { totalValues, stockDatasets, tickers } = data;
+  const {totalValues,stockValues,stockPrices,tickers}=data;
   const totalNow = totalValues[totalValues.length - 1] || 0;
 
   const rows = tickers.map((ticker, i) => {
-    const vals = stockDatasets[ticker];
-    const first = vals.find(v => v > 0) || 0;
-    const last  = vals[vals.length - 1] || 0;
-    const pct   = first > 0 ? ((last - first) / first * 100) : 0;
+    const prices=stockPrices[ticker]||[];
+    const values=stockValues[ticker]||[];
+    const first=prices.find(v=>v>0)||0;
+    const lastPrice=[...prices].reverse().find(v=>v>0)||0;
+    const last=values[values.length-1]||0;
+    const pct=first>0&&lastPrice>0?((lastPrice-first)/first*100):0;
     const portPct = totalNow > 0 ? (last / totalNow * 100) : 0;
     return { ticker, value: last, pct, portPct, color: CHART_COLORS[i % CHART_COLORS.length] };
   }).sort((a, b) => b.pct - a.pct);
@@ -760,7 +918,7 @@ function renderStockPerformance(data) {
     const vsAvg = r.pct - avgPct;
     html += `<tr>
       <td style="padding:7px 10px;font-weight:700"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${r.color};margin-right:6px"></span>${escapeHtml(r.ticker)}</td>
-      <td style="padding:7px 10px;text-align:right">S$ ${Number(r.value).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+      <td style="padding:7px 10px;text-align:right">${fmtUsd(r.value)}</td>
       <td style="padding:7px 10px;text-align:right">${r.portPct.toFixed(1)}%</td>
       <td style="padding:7px 10px;text-align:right;color:${r.pct>=0?'var(--green)':'var(--red)'};font-weight:600">${r.pct>=0?'+':''}${r.pct.toFixed(1)}%</td>
       <td style="padding:7px 10px;text-align:right;color:${vsAvg>=0?'var(--green)':'var(--red)'}">${vsAvg>=0?'▲':'▼'} ${Math.abs(vsAvg).toFixed(1)}%</td>
@@ -769,7 +927,7 @@ function renderStockPerformance(data) {
 
   html += `<tr style="background:var(--bg3);border-top:1px solid var(--border2)">
     <td style="padding:7px 10px;font-weight:700">Portfolio Avg</td>
-    <td style="padding:7px 10px;text-align:right;font-weight:700">S$ ${Number(totalNow).toLocaleString('en-SG',{minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+    <td style="padding:7px 10px;text-align:right;font-weight:700">${fmtUsd(totalNow)}</td>
     <td style="padding:7px 10px;text-align:right">100%</td>
     <td style="padding:7px 10px;text-align:right;font-weight:700;color:${avgPct>=0?'var(--green)':'var(--red)'}">${avgPct>=0?'+':''}${avgPct.toFixed(1)}%</td>
     <td style="padding:7px 10px;text-align:center;color:var(--text-muted)">—</td>
