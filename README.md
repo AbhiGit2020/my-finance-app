@@ -1,10 +1,11 @@
-# Stock Analysis - Local Development
+# Portfolio Tracker - Local Development
 
 This branch runs the stock-analysis app locally and stores private data in a JSON file.
 
-The application has three workspaces:
+The application has four workspaces:
 
-- **My Portfolios** - separate accounts for the user and family members, holdings, transactions, and price movement.
+- **Portfolios** - separate accounts for the user and family members, holdings, transactions, and price movement.
+- **Analysis** - allocation, concentration, account contribution, returns, and holding momentum.
 - **Trend Comparison** - portfolio accounts and individual holdings compared with S&P 500, Gold, Nasdaq 100, and other benchmarks.
 - **Watch Lists** - stocks, ETFs, and indexes being monitored outside current holdings.
 

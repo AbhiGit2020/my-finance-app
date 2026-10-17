@@ -251,7 +251,7 @@ function exportToExcel(sheets) {
   sheets.forEach(sheet => {
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(sheet.data), sheet.name);
   });
-  XLSX.writeFile(workbook, `StockAnalysis_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.writeFile(workbook, `PortfolioTracker_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 function exportAllData() {
@@ -270,7 +270,7 @@ function exportJsonBackup() {
   const blob = new Blob([JSON.stringify({ ..._db, exported_at: new Date().toISOString() }, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `StockAnalysis_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = `PortfolioTracker_Backup_${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
 }
@@ -296,7 +296,7 @@ function importJsonBackup() {
         triggerRender();
       } catch (error) {
         console.error('importJsonBackup:', error);
-        alert('Could not import this JSON backup. Please choose a valid Stock Analysis JSON file.');
+        alert('Could not import this JSON backup. Please choose a valid Portfolio Tracker JSON file.');
       }
     };
     reader.readAsText(file);

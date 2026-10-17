@@ -155,7 +155,7 @@ async function fetchYahooHistory(symbol, from, to) {
   endpoint.searchParams.set('interval', '1d');
   endpoint.searchParams.set('events', 'history');
   const response = await fetch(endpoint, {
-    headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 StockAnalysisLocal/1.0' },
+    headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 PortfolioTrackerLocal/1.0' },
   });
   if (!response.ok) throw new Error(`Historical price provider returned ${response.status}`);
   const result = (await response.json())?.chart?.result?.[0];
@@ -230,7 +230,7 @@ const server = http.createServer(async (req, res) => {
 
 ensureDataFile().then(() => {
   server.listen(PORT, HOST, () => {
-    console.log(`Stock Analysis is running at http://${HOST}:${server.address().port}`);
+    console.log(`Portfolio Tracker is running at http://${HOST}:${server.address().port}`);
     console.log(`Private data file: ${DATA_FILE}`);
   });
 }).catch(error => {

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Stock Analysis - My Portfolios</title>
+<title>Portfolio Tracker - My Portfolio</title>
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -33,9 +33,10 @@ th:first-child .sort-header { justify-content:flex-start; }
 <div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading local stock data...</div></div>
 
 <nav class="nav">
-  <a class="nav-brand" href="stocks.html">Stock Analysis</a>
+  <a class="nav-brand" href="stocks.html">Portfolio Tracker</a>
   <div class="nav-links">
-    <a href="stocks.html" class="active">My Portfolios</a>
+    <a href="stocks.html" class="active">Portfolios</a>
+    <a href="analysis.html">Analysis</a>
     <a href="stock_compare.html">Trend Comparison</a>
     <a href="stock_tracker.html">Watch Lists</a>
   </div>
@@ -54,12 +55,9 @@ th:first-child .sort-header { justify-content:flex-start; }
 </nav>
 
 <div class="page">
-  <div class="page-title" id="portfolioPageTitle">My Portfolio</div>
-
-  <!-- Profile selector -->
-  <div class="flex flex-gap flex-center mb-16 flex-wrap">
-
-    <div style="margin-left:auto;display:flex;gap:8px;align-items:flex-end">
+  <div class="page-heading">
+    <div class="page-title" id="portfolioPageTitle">My Portfolio</div>
+    <div class="page-actions">
       <button class="btn btn-primary" id="fetchBtn" onclick="fetchPrices()">🔄 Fetch Prices</button>
       <button class="btn btn-secondary" onclick="exportStocksExcel()">⬇ Export Excel</button>
     </div>
@@ -241,7 +239,7 @@ function profile(){ return getActiveProfile(); }
 function updatePortfolioTitle(){
   const name=profile();
   document.getElementById('portfolioPageTitle').textContent=name;
-  document.title=`${name} - Stock Analysis`;
+  document.title=`${name} - Portfolio Tracker`;
 }
 
 function isConsolidated(){ return profile()===CONSOLIDATED_PROFILE; }

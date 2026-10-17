@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Analysis - Portfolio Tracker</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="js/stock-core.js"></script>
+<script src="js/store.js"></script>
+<style>
+.analysis-grid { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(380px,0.9fr); gap:16px; margin-bottom:20px; }
+.analysis-panel { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; min-width:0; }
+.analysis-panel-title { color:var(--text-muted); font-size:0.82rem; font-weight:600; text-transform:uppercase; margin-bottom:12px; }
+.analysis-chart { position:relative; height:310px; }
+.analysis-empty { display:grid; place-items:center; height:100%; color:var(--text-muted); font-size:0.86rem; }
+.analysis-table-section { margin-top:4px; }
+.sort-header { display:inline-flex; align-items:center; justify-content:flex-end; gap:5px; width:100%; padding:0; border:0; background:none; color:inherit; font:inherit; text-transform:inherit; cursor:pointer; white-space:nowrap; }
+th:first-child .sort-header { justify-content:flex-start; }
+.sort-header:hover, .sort-header:focus-visible { color:var(--text); }
+.sort-indicator { width:10px; color:var(--teal); }
+@media (max-width:1100px) { .analysis-grid { grid-template-columns:1fr; } }
+@media (max-width:768px) { .analysis-panel { padding:14px 12px; } .analysis-chart { height:270px; } }
+</style>
+</head>
+<body>
+<div id="loadingOverlay"><div class="loader-spinner"></div><div class="loader-text" id="loadingMsg">Loading portfolio analysis...</div></div>
+
+<nav class="nav">
+  <a class="nav-brand" href="stocks.html">Portfolio Tracker</a>
+  <div class="nav-links">
+    <a href="stocks.html">Portfolios</a>
+    <a href="analysis.html" class="active">Analysis</a>
+    <a href="stock_compare.html">Trend Comparison</a>
+    <a href="stock_tracker.html">Watch Lists</a>
+  </div>
+  <div class="nav-right">
+    <span id="storageStatus" class="drive-status-text"></span>
+    <div class="nav-btn-row">
+      <select class="global-profile-sel profile-sel-nav"></select>
+      <button class="btn btn-sm btn-ghost" onclick="reloadLocalDataSafely()" title="Reload local JSON">↻</button>
+      <button class="btn btn-sm btn-teal" onclick="localSave()" title="Save local JSON">Save</button>
+      <button class="btn btn-sm btn-ghost" onclick="localBackup()" title="Create local backup">Backup</button>
+      <button class="btn btn-sm btn-ghost" onclick="exportAllData()" title="Export Excel">⬇ Excel</button>
+      <button class="btn btn-sm btn-ghost" onclick="exportJsonBackup()" title="Export JSON backup">⬇ JSON</button>
+      <button class="btn btn-sm btn-ghost" onclick="importJsonBackup()" title="Import JSON backup">⬆ JSON</button>
+    </div>
+  </div>
+</nav>
+
+<main class="page">
+  <div class="page-heading">
+    <div class="page-title" id="analysisTitle">Portfolio Analysis</div>
+    <div class="page-actions">
+      <button class="btn btn-secondary" onclick="exportAnalysis()">⬇ Export Analysis</button>
+    </div>
+  </div>
+
+  <div class="kpi-grid" id="analysisKpis"></div>
+
+  <div class="analysis-grid">
+    <section class="analysis-panel">
+      <div class="analysis-panel-title">Portfolio Allocation</div>
+      <div class="analysis-chart" id="allocationChartWrap"><canvas id="allocationChart"></canvas></div>
+    </section>
+    <section class="analysis-panel">
+      <div class="analysis-panel-title" id="comparisonTitle">Account Contribution</div>
+      <div class="analysis-chart" id="comparisonChartWrap"><canvas id="comparisonChart"></canvas></div>
+    </section>
+  </div>
+
+  <section class="analysis-table-section">
+    <div class="section-header"><div class="section-title">Holding Analysis</div></div>
+    <div class="tbl-wrap"><table id="analysisTable"></table></div>
+  </section>
+</main>
+
+<div class="toast-container" id="toastContainer"></div>
+<script>
+const COLORS=['#1f9d8a','#4d8dff','#d29922','#df6b9b','#8b7cf6','#52b788','#f07f4f','#48a9a6','#b8a13a','#778da9'];
+const COLUMNS=[
+  {key:'ticker',label:'Ticker',type:'text'},
+  {key:'marketValue',label:'Market Value',type:'number'},
+  {key:'weight',label:'Weight',type:'number'},
+  {key:'costBasis',label:'Cost Basis',type:'number'},
+  {key:'unrealized',label:'Unrealized P&L',type:'number'},
+  {key:'returnPct',label:'Return on Cost',type:'number'},
+  {key:'weekPct',label:'1W',type:'number'},
+  {key:'monthPct',label:'1M',type:'number'},
+  {key:'ytdPct',label:'YTD',type:'number'},
+  {key:'asOf',label:'As Of',type:'text'},
+];
+let sortState={key:'marketValue',direction:'desc'};
+let analysisRows=[];
+let allocationChart=null;
+let comparisonChart=null;
+
+function profile(){return getActiveProfile();}
+function isConsolidated(){return profile()===CONSOLIDATED_PROFILE;}
+function fmt(value,decimals=2){return Number(value||0).toLocaleString('en-SG',{minimumFractionDigits:decimals,maximumFractionDigits:decimals});}
+function money(value,decimals=0){return `US$ ${fmt(value,decimals)}`;}
+function pct(value){return value==null?'—':`${value>=0?'+':''}${fmt(value,1)}%`;}
+function change(current,reference){return reference>0?(current-reference)/reference*100:null;}
+function accountProfiles(){return loadPortfolioAccounts().filter(row=>row.active!==false&&row.name!==CONSOLIDATED_PROFILE).map(row=>row.name);}
+function transactionsFor(profiles){const allowed=new Set(profiles);return loadStockTransactions().filter(row=>allowed.has(row.profile));}
+function selectedProfiles(){return isConsolidated()?accountProfiles():[profile()];}
+function selectedTransactions(){return transactionsFor(selectedProfiles());}
+
+function selectedPrices(){
+  const allowed=new Set(selectedProfiles());
+  const rows=loadStockPrices().filter(row=>allowed.has(row.profile));
+  if(!isConsolidated())return rows;
+  const unique=new Map();
+  rows.forEach(row=>{
+    const key=`${row.ticker}|${row.asof_date}`;
+    const current=unique.get(key);
+    if(!current||String(row.fetched_at||'')>String(current.fetched_at||''))unique.set(key,row);
+  });
+  return [...unique.values()];
+}
+
+function priceAsOf(prices,ticker,date='9999-12-31'){
+  return prices.filter(row=>row.ticker===ticker&&String(row.asof_date||'')<=date)
+    .reduce((best,row)=>(!best||String(row.asof_date||'')>String(best.asof_date||''))?row:best,null);
+}
+
+function flows(txns){
+  return txns.reduce((sum,row)=>{
+    const amount=(Number(row.qty)||0)*(Number(row.price)||0);
+    const commission=Math.abs(Number(row.commission)||0);
+    if(String(row.action).toUpperCase()==='BUY')sum.purchases+=amount+commission;
+    if(String(row.action).toUpperCase()==='SELL')sum.sales+=Math.max(0,amount-commission);
+    return sum;
+  },{purchases:0,sales:0});
+}
+
+function holdingsFor(profiles,txns=transactionsFor(profiles)){
+  return profiles.length>1
+    ? StockCore.computeConsolidatedHoldings(txns,profiles,()=>1).holdings
+    : StockCore.computeHoldings(txns,()=>1).holdings;
+}
+
+function buildRows(){
+  const prices=selectedPrices();
+  const holdings=holdingsFor(selectedProfiles(),selectedTransactions());
+  const weekDate=new Date(Date.now()-7*86400000).toISOString().slice(0,10);
+  const monthDate=new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+  const ytdDate=`${new Date().getFullYear()}-01-01`;
+  const rows=holdings.map(holding=>{
+    const latest=priceAsOf(prices,holding.ticker);
+    const close=Number(latest?.close)||0;
+    const marketValue=holding.qty*close;
+    const ref=date=>Number(priceAsOf(prices,holding.ticker,date)?.close)||0;
+    return {
+      ticker:holding.ticker, marketValue, costBasis:holding.cost_basis,
+      unrealized:marketValue-holding.cost_basis,
+      returnPct:holding.cost_basis>0?(marketValue-holding.cost_basis)/holding.cost_basis*100:null,
+      weekPct:change(close,ref(weekDate)), monthPct:change(close,ref(monthDate)), ytdPct:change(close,ref(ytdDate)),
+      asOf:latest?.asof_date||'', weight:0,
+    };
+  });
+  const total=rows.reduce((sum,row)=>sum+row.marketValue,0);
+  rows.forEach(row=>{row.weight=total>0?row.marketValue/total*100:0;});
+  return rows;
+}
+
+function accountRows(){
+  return selectedProfiles().map(name=>{
+    const txns=transactionsFor([name]);
+    const holdings=holdingsFor([name],txns);
+    const marketValue=holdings.reduce((sum,holding)=>sum+holding.qty*(Number(latestStockPrice(name,holding.ticker)?.close)||0),0);
+    const cashFlow=flows(txns);
+    return {name,marketValue,returnPct:cashFlow.purchases>0?(marketValue+cashFlow.sales-cashFlow.purchases)/cashFlow.purchases*100:null};
+  });
+}
+
+function signedClass(value){return value==null?'neutral':value>=0?'pos':'neg';}
+function renderKpis(rows){
+  const txns=selectedTransactions();
+  const cashFlow=flows(txns);
+  const marketValue=rows.reduce((sum,row)=>sum+row.marketValue,0);
+  const costBasis=rows.reduce((sum,row)=>sum+row.costBasis,0);
+  const unrealized=marketValue-costBasis;
+  const roi=cashFlow.purchases>0?(marketValue+cashFlow.sales-cashFlow.purchases)/cashFlow.purchases*100:null;
+  const topFive=[...rows].sort((a,b)=>b.marketValue-a.marketValue).slice(0,5).reduce((sum,row)=>sum+row.weight,0);
+  const items=[
+    ['Portfolio Value',money(marketValue),'neutral'],['Invested Capital',money(cashFlow.purchases),'neutral'],
+    ['Unrealized P&L',money(unrealized),signedClass(unrealized)],['Return on Investment',pct(roi),signedClass(roi)],
+    ['Open Positions',String(rows.length),'neutral'],['Top 5 Concentration',`${fmt(topFive,1)}%`,topFive>70?'neg':'neutral'],
+  ];
+  document.getElementById('analysisKpis').innerHTML=items.map(([label,value,cls])=>`<div class="kpi ${cls==='pos'?'green':cls==='neg'?'red':'teal'}"><div class="kpi-label">${label}</div><div class="kpi-value ${cls}">${value}</div></div>`).join('');
+}
+
+function chartOptions(){return {responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#c9d1d9',boxWidth:12,padding:12}},tooltip:{callbacks:{label:context=>`${context.label}: ${money(context.raw)} (${fmt(context.dataset.data.reduce((s,v)=>s+v,0)?context.raw/context.dataset.data.reduce((s,v)=>s+v,0)*100:0,1)}%)`}}}};}
+
+function renderCharts(rows){
+  if(allocationChart)allocationChart.destroy();
+  if(comparisonChart)comparisonChart.destroy();
+  const ranked=[...rows].sort((a,b)=>b.marketValue-a.marketValue);
+  const top=ranked.slice(0,9);
+  const other=ranked.slice(9).reduce((sum,row)=>sum+row.marketValue,0);
+  const allocation=other>0?[...top,{ticker:'Other',marketValue:other}]:top;
+  allocationChart=new Chart(document.getElementById('allocationChart'),{type:'doughnut',data:{labels:allocation.map(row=>row.ticker),datasets:[{data:allocation.map(row=>row.marketValue),backgroundColor:COLORS,borderColor:'#161b22',borderWidth:2}]},options:{...chartOptions(),cutout:'58%'}});
+
+  const accounts=accountRows();
+  document.getElementById('comparisonTitle').textContent=isConsolidated()?'Account Contribution':'Largest Holdings';
+  const comparison=isConsolidated()?accounts:ranked.slice(0,8).map(row=>({name:row.ticker,marketValue:row.marketValue}));
+  comparisonChart=new Chart(document.getElementById('comparisonChart'),{type:'bar',data:{labels:comparison.map(row=>row.name),datasets:[{label:'Market Value',data:comparison.map(row=>row.marketValue),backgroundColor:comparison.map((row,index)=>COLORS[index%COLORS.length]),borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:context=>money(context.raw)}}},scales:{x:{ticks:{color:'#8b949e',callback:value=>money(value)},grid:{color:'rgba(255,255,255,0.05)'}},y:{ticks:{color:'#c9d1d9'},grid:{display:false}}}}});
+}
+
+function setSort(key){sortState=sortState.key===key?{key,direction:sortState.direction==='asc'?'desc':'asc'}:{key,direction:key==='ticker'?'asc':'desc'};renderTable();}
+function sortedRows(){
+  const column=COLUMNS.find(item=>item.key===sortState.key)||COLUMNS[0];
+  const direction=sortState.direction==='asc'?1:-1;
+  return [...analysisRows].sort((a,b)=>{
+    const result=column.type==='number'?(a[column.key]??-Infinity)-(b[column.key]??-Infinity):String(a[column.key]||'').localeCompare(String(b[column.key]||''));
+    return result*direction;
+  });
+}
+
+function renderTable(){
+  const header=COLUMNS.map(column=>`<th aria-sort="${sortState.key===column.key?(sortState.direction==='asc'?'ascending':'descending'):'none'}"><button class="sort-header" onclick="setSort('${column.key}')">${column.label}<span class="sort-indicator">${sortState.key===column.key?(sortState.direction==='asc'?'↑':'↓'):''}</span></button></th>`).join('');
+  const body=sortedRows().map(row=>`<tr><td class="bold">${escapeHtml(row.ticker)}</td><td class="bold">${money(row.marketValue)}</td><td>${fmt(row.weight,1)}%</td><td>${money(row.costBasis)}</td><td class="${signedClass(row.unrealized)}">${money(row.unrealized)}</td><td class="${signedClass(row.returnPct)}">${pct(row.returnPct)}</td><td class="${signedClass(row.weekPct)}">${pct(row.weekPct)}</td><td class="${signedClass(row.monthPct)}">${pct(row.monthPct)}</td><td class="${signedClass(row.ytdPct)}">${pct(row.ytdPct)}</td><td class="text-muted">${escapeHtml(row.asOf)}</td></tr>`).join('');
+  document.getElementById('analysisTable').innerHTML=`<thead><tr>${header}</tr></thead><tbody>${body||'<tr><td colspan="10" class="text-muted" style="text-align:center;padding:20px">No holdings to analyse.</td></tr>'}</tbody>`;
+}
+
+function exportAnalysis(){
+  exportToExcel([{name:'holding_analysis',data:analysisRows.map(row=>({Ticker:row.ticker,'Market Value USD':row.marketValue,'Weight %':row.weight,'Cost Basis USD':row.costBasis,'Unrealized P&L USD':row.unrealized,'Return on Cost %':row.returnPct,'1W %':row.weekPct,'1M %':row.monthPct,'YTD %':row.ytdPct,'As Of':row.asOf}))},{name:'account_summary',data:accountRows()}]);
+}
+
+function render(){
+  const name=profile();
+  document.getElementById('analysisTitle').textContent=`${name} Analysis`;
+  document.title=`${name} Analysis - Portfolio Tracker`;
+  analysisRows=buildRows();
+  renderKpis(analysisRows);renderCharts(analysisRows);renderTable();
+}
+window.onProfileChange=render;
+window.onDataLoaded=render;
+</script>
+</body>
+</html>
