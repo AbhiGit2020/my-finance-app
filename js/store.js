@@ -29,9 +29,12 @@ function emptyDb() {
 
 function normalizeDb(data) {
   const normalized = { ...emptyDb(), ...StockCore.normalizeDatabase(data, DB_SCHEMA_VERSION) };
-  const accountNames = new Set((normalized.portfolio_accounts || []).map(account => account.name).filter(Boolean));
+  normalized.portfolio_accounts = (normalized.portfolio_accounts || []).filter(account => !String(account.name || '').startsWith('__'));
+  const accountNames = new Set(normalized.portfolio_accounts.map(account => account.name).filter(Boolean));
   ['stock_transactions', 'stock_prices', 'stock_watchlists', 'stock_tracker_symbols', 'stock_tracker_prices'].forEach(collection => {
-    (normalized[collection] || []).forEach(row => { if (row.profile) accountNames.add(row.profile); });
+    (normalized[collection] || []).forEach(row => {
+      if (row.profile && !String(row.profile).startsWith('__')) accountNames.add(row.profile);
+    });
   });
   if (!accountNames.size) accountNames.add('My Portfolio');
   const existingByName = new Map((normalized.portfolio_accounts || []).map(account => [account.name, account]));

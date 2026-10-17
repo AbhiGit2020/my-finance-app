@@ -404,15 +404,15 @@ function renderTransactions(){
   if(search) txns=txns.filter(t=>t.ticker.includes(search));
   txns.sort((a,b)=>new Date(b.date)-new Date(a.date));
 
-  const cols=['Date','Ticker','Action','Qty','Price','Currency','Notes'];
+  const cols=['Date','Ticker','Action','Qty','Price','Commission','Currency','Notes'];
   let html=`<thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
-  if(!txns.length) html+='<tr><td colspan="7" class="text-muted" style="text-align:center;padding:16px">No transactions</td></tr>';
+  if(!txns.length) html+='<tr><td colspan="8" class="text-muted" style="text-align:center;padding:16px">No transactions</td></tr>';
   txns.forEach(t=>{
     html+=`<tr>
       <td>${escapeHtml(t.date||'')}</td>
       <td class="bold">${escapeHtml(t.ticker)}</td>
       <td><span class="chip chip-${t.action==='BUY'?'buy':'sell'}">${t.action}</span></td>
-      <td>${fmt(t.qty,4)}</td><td>${fmt(t.price)}</td>
+      <td>${fmt(t.qty,4)}</td><td>${fmt(t.price)}</td><td>${t.commission?fmt(t.commission):'—'}</td>
       <td>${escapeHtml(t.currency||'')}</td><td class="text-muted" style="text-align:left">${escapeHtml(t.notes||'')}</td>
     </tr>`;
   });

@@ -69,20 +69,23 @@
         const qty = number(row.qty);
         const price = number(row.price);
         const currency = String(row.currency || 'SGD').toUpperCase();
-        const priceSgd = price * number(resolveRate(currency, row.date));
+        const rate = number(resolveRate(currency, row.date));
+        const priceSgd = price * rate;
+        const commissionSgd = Math.abs(number(row.commission)) * rate;
         if (!positions[ticker]) positions[ticker] = { qty: 0, cost: 0, currency };
         if (!Object.hasOwn(realized, ticker)) realized[ticker] = 0;
         positions[ticker].currency = currency;
 
         if (String(row.action || '').toUpperCase() === 'BUY') {
           positions[ticker].qty += qty;
-          positions[ticker].cost += qty * priceSgd;
+          positions[ticker].cost += qty * priceSgd + commissionSgd;
           return;
         }
 
         const sellQty = Math.min(qty, Math.max(positions[ticker].qty, 0));
         const averageCost = positions[ticker].qty > 0 ? positions[ticker].cost / positions[ticker].qty : 0;
-        realized[ticker] += sellQty * (priceSgd - averageCost);
+        const allocatedCommission = qty > 0 ? commissionSgd * (sellQty / qty) : 0;
+        realized[ticker] += sellQty * (priceSgd - averageCost) - allocatedCommission;
         positions[ticker].qty -= sellQty;
         positions[ticker].cost -= sellQty * averageCost;
         if (Math.abs(positions[ticker].qty) < 0.0000001) {
