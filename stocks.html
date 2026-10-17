@@ -160,7 +160,7 @@ th:first-child .sort-header { justify-content:flex-start; }
         </div>
         <div class="toggle-group" aria-label="Chart measure">
           <button class="toggle-btn active" id="toggleValue" onclick="setChartMeasure('value')">Value</button>
-          <button class="toggle-btn" id="togglePerformance" onclick="setChartMeasure('performance')">Performance %</button>
+          <button class="toggle-btn" id="togglePerformance" onclick="setChartMeasure('performance')">Return %</button>
         </div>
         <div class="toggle-group" aria-label="Chart period">
           <button class="toggle-btn" data-range="all" onclick="setChartRange('all')">All</button>
@@ -225,6 +225,16 @@ function fmt(n,dec=2){ return Number(n||0).toLocaleString('en-SG',{minimumFracti
 function fmtN(n){ return fmt(n,0); }
 function fmtUsd(n,dec=0){ return `US$ ${fmt(n,dec)}`; }
 function pct(a,b){ if(!b) return 0; return (a-b)/b*100; }
+
+function investmentFlows(txns){
+  return (txns||[]).reduce((totals,row)=>{
+    const value=(parseFloat(row.qty)||0)*(parseFloat(row.price)||0);
+    const commission=Math.abs(parseFloat(row.commission)||0);
+    if(String(row.action||'').toUpperCase()==='BUY')totals.purchases+=value+commission;
+    else if(String(row.action||'').toUpperCase()==='SELL')totals.sales+=Math.max(0,value-commission);
+    return totals;
+  },{purchases:0,sales:0});
+}
 
 function profile(){ return getActiveProfile(); }
 
@@ -499,7 +509,9 @@ function render(){
   const wMV=r=>r.market_value;
   const wavg=(fn)=>{const valid=rows.filter(r=>fn(r)!=null);const denom=valid.reduce((s,r)=>s+wMV(r),0);if(!denom)return null;return valid.reduce((s,r)=>s+fn(r)*wMV(r),0)/denom;};
   const signedKpi=(label,value)=>({label,val:value==null?'—':`${fmt(value,1)}%`,cls:value==null?'neutral':value>=0?'pos':'neg'});
-  const weekly=wavg(r=>r.weekly_pct),monthly=wavg(r=>r.monthly_pct),ytd=wavg(r=>r.ytd_pct),totalReturn=wavg(r=>r.total_return_pct);
+  const weekly=wavg(r=>r.weekly_pct),monthly=wavg(r=>r.monthly_pct),ytd=wavg(r=>r.ytd_pct);
+  const totalFlows=investmentFlows(txns);
+  const totalReturn=totalFlows.purchases>0?(totalMV+totalFlows.sales-totalFlows.purchases)/totalFlows.purchases*100:null;
 
   // KPIs
   const kpiGrid=document.getElementById('stockKPIs');
@@ -508,7 +520,7 @@ function render(){
     signedKpi('Weekly %',weekly),
     signedKpi('Monthly %',monthly),
     signedKpi('YTD %',ytd),
-    signedKpi('Total Return %',totalReturn),
+    signedKpi('Return on Investment',totalReturn),
     {label:'Unrealized P&L',val:fmtUsd(totalUnrealized),cls:totalUnrealized>=0?'pos':'neg'},
   ];
   kpiGrid.innerHTML=kpis.map(k=>`<div class="kpi ${k.cls==='neutral'?'teal':k.cls==='pos'?'green':'red'}"><div class="kpi-label">${k.label}</div><div class="kpi-value ${k.cls}">${k.val}</div></div>`).join('');
@@ -563,22 +575,27 @@ function renderAccountOverview(){
     const {holdings}=computeHoldings(txns);
     const costBasis=holdings.reduce((sum,holding)=>sum+holding.cost_basis,0);
     const marketValue=holdings.reduce((sum,holding)=>sum+holding.qty*(parseFloat(latestPriceForView(holding.ticker)?.close)||0),0);
-    return {name,holdings:holdings.length,costBasis,marketValue,unrealized:marketValue-costBasis};
+    const flows=investmentFlows(txns);
+    const investmentReturn=flows.purchases>0?(marketValue+flows.sales-flows.purchases)/flows.purchases*100:null;
+    return {name,holdings:holdings.length,costBasis,marketValue,unrealized:marketValue-costBasis,investmentReturn,flows};
   });
   const totals=accounts.reduce((result,row)=>({
     holdings:result.holdings+row.holdings,
     costBasis:result.costBasis+row.costBasis,
     marketValue:result.marketValue+row.marketValue,
     unrealized:result.unrealized+row.unrealized,
-  }),{holdings:0,costBasis:0,marketValue:0,unrealized:0});
+    purchases:result.purchases+row.flows.purchases,
+    sales:result.sales+row.flows.sales,
+  }),{holdings:0,costBasis:0,marketValue:0,unrealized:0,purchases:0,sales:0});
+  totals.investmentReturn=totals.purchases>0?(totals.marketValue+totals.sales-totals.purchases)/totals.purchases*100:null;
   const rowHtml=accounts.map(row=>`<tr>
     <td class="bold">${escapeHtml(row.name)}</td><td>${fmtN(row.holdings)}</td>
     <td>${fmt(row.costBasis)}</td><td class="bold">${fmt(row.marketValue)}</td>
-    <td class="${row.unrealized>=0?'pos':'neg'}">${fmt(row.unrealized)}</td>
+    <td class="${row.unrealized>=0?'pos':'neg'}">${fmt(row.unrealized)}</td><td class="${row.investmentReturn>=0?'pos':'neg'}">${fmt(row.investmentReturn,1)}%</td>
   </tr>`).join('');
   document.getElementById('accountOverviewTable').innerHTML=`
-    <thead><tr><th>Account</th><th>Positions</th><th>Cost Basis USD</th><th>Market Value USD</th><th>Unrealized P&amp;L</th></tr></thead>
-    <tbody>${rowHtml}<tr class="bold"><td>Total</td><td>${fmtN(totals.holdings)}</td><td>${fmt(totals.costBasis)}</td><td>${fmt(totals.marketValue)}</td><td class="${totals.unrealized>=0?'pos':'neg'}">${fmt(totals.unrealized)}</td></tr></tbody>`;
+    <thead><tr><th>Account</th><th>Positions</th><th>Cost Basis USD</th><th>Market Value USD</th><th>Unrealized P&amp;L</th><th>Return on Investment</th></tr></thead>
+    <tbody>${rowHtml}<tr class="bold"><td>Total</td><td>${fmtN(totals.holdings)}</td><td>${fmt(totals.costBasis)}</td><td>${fmt(totals.marketValue)}</td><td class="${totals.unrealized>=0?'pos':'neg'}">${fmt(totals.unrealized)}</td><td class="${totals.investmentReturn>=0?'pos':'neg'}">${fmt(totals.investmentReturn,1)}%</td></tr></tbody>`;
   section.style.display='block';
 }
 
@@ -854,11 +871,11 @@ function buildPortfolioChart() {
     const byStock = {},byStockPrice={};
     tickers.forEach(ticker => {
       const snap=priceFromSeries(priceSeries[ticker],dateStr);
-      if(!snap){byStock[ticker]=0;byStockPrice[ticker]=0;return;}
-      const price=parseFloat(snap.close)||0;
-      byStockPrice[ticker]=price;
       const qty = pos[ticker]?.qty || 0;
       if (qty <= 0) { byStock[ticker] = 0; return; }
+      const marketPrice=parseFloat(snap?.close)||0;
+      const price=marketPrice||pos[ticker]?.avg_cost||0;
+      byStockPrice[ticker]=marketPrice;
       const val = qty * price;
       byStock[ticker] = val;
       total += val;
@@ -866,17 +883,16 @@ function buildPortfolioChart() {
     return { total, byStock, byStockPrice };
   }
 
-  function positionValueAtDate(positions,dateStr){
-    return Object.entries(positions).reduce((total,[ticker,holding])=>{
-      if(holding.qty<=0||!priceSeries[ticker])return total;
-      const snap=priceFromSeries(priceSeries[ticker],dateStr);
-      if(!snap)return total;
-      const price=parseFloat(snap.close)||0;
-      return total+holding.qty*price;
-    },0);
-  }
-
   const totalValues = [];
+  const flowsByDate=new Map();
+  txns.forEach(row=>{
+    const current=flowsByDate.get(row.date)||{purchases:0,sales:0};
+    const flow=investmentFlows([row]);
+    current.purchases+=flow.purchases;
+    current.sales+=flow.sales;
+    flowsByDate.set(row.date,current);
+  });
+  const portfolioFlows=allDates.map(date=>flowsByDate.get(date)||{purchases:0,sales:0});
   const stockValues = {},stockPrices={};
   tickers.forEach(t=>{stockValues[t]=[];stockPrices[t]=[];});
 
@@ -885,23 +901,15 @@ function buildPortfolioChart() {
     totalValues.push(total);
     tickers.forEach(t=>{stockValues[t].push(byStock[t]||0);stockPrices[t].push(byStockPrice[t]||0);});
   });
-  const portfolioPeriodReturns=allDates.map((dateStr,index)=>{
-    if(index===0)return 0;
-    const priorPositions=holdingsAtDate(allDates[index-1]);
-    const openingValue=positionValueAtDate(priorPositions,allDates[index-1]);
-    const closingValue=positionValueAtDate(priorPositions,dateStr);
-    return openingValue>0?closingValue/openingValue-1:0;
-  });
-
   let startIdx = 0;
   while (startIdx < totalValues.length - 1 && totalValues[startIdx] === 0) startIdx++;
   const trimDates  = allDates.slice(startIdx);
   const trimTotal  = totalValues.slice(startIdx);
-  const trimReturns=portfolioPeriodReturns.slice(startIdx);
+  const trimFlows=portfolioFlows.slice(startIdx);
   const trimValues={},trimPrices={};
   tickers.forEach(t=>{trimValues[t]=stockValues[t].slice(startIdx);trimPrices[t]=stockPrices[t].slice(startIdx);});
 
-  window.chartDataCache={allDates:trimDates,totalValues:trimTotal,portfolioPeriodReturns:trimReturns,stockValues:trimValues,stockPrices:trimPrices,tickers};
+  window.chartDataCache={allDates:trimDates,totalValues:trimTotal,portfolioFlows:trimFlows,stockValues:trimValues,stockPrices:trimPrices,tickers};
   document.getElementById('chartLoading').style.display = 'none';
   document.getElementById('chartWrap').style.display = 'block';
   document.getElementById('stockPerformance').style.display = 'block';
@@ -911,7 +919,7 @@ function buildPortfolioChart() {
 const CHART_COLORS = ['#068a91','#3fb950','#d29922','#f85149','#a371f7','#58a6ff','#fb8500','#2dc653'];
 
 function renderPortfolioChart(data) {
-  const {allDates,totalValues,portfolioPeriodReturns,stockValues,stockPrices,tickers}=data;
+  const {allDates,totalValues,portfolioFlows,stockValues,stockPrices,tickers}=data;
   if (window.portfolioChart) portfolioChart.destroy();
 
   const rangeStart=chartRangeStart(window.chartRange,allDates[allDates.length-1]);
@@ -919,7 +927,7 @@ function renderPortfolioChart(data) {
   if(startIndex<0)startIndex=Math.max(0,allDates.length-1);
   const visibleDates=allDates.slice(startIndex);
   const visibleTotal=totalValues.slice(startIndex);
-  const visiblePortfolioReturns=portfolioPeriodReturns.slice(startIndex);
+  const visibleFlows=portfolioFlows.slice(startIndex).map((flow,index)=>startIndex>0&&index===0?{purchases:0,sales:0}:flow);
   const visibleValues={},visiblePrices={};
   tickers.forEach(ticker=>{
     visibleValues[ticker]=stockValues[ticker].slice(startIndex);
@@ -932,9 +940,10 @@ function renderPortfolioChart(data) {
 
   let datasets;
   if(window.chartScope==='portfolio'){
+    const openingCapital=startIndex>0?(visibleTotal[0]||0):0;
     datasets = [{
-      label: performance?'Portfolio Performance':'Portfolio Value',
-      data:performance?StockCore.chainReturnSeries(visiblePortfolioReturns):visibleTotal,
+      label: performance?'Return on Invested Capital':'Portfolio Value',
+      data:performance?StockCore.investmentReturnSeries(visibleTotal,visibleFlows,openingCapital):visibleTotal,
       borderColor: '#068a91',
       backgroundColor: 'rgba(6,138,145,0.12)',
       borderWidth: 2.5,

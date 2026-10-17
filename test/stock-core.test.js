@@ -84,6 +84,31 @@ test('chain return series compounds period returns without treating cash flows a
   assert.ok(Math.abs(result[2] - 4.5) < 1e-9);
 });
 
+test('investment return series removes fresh purchases from performance', () => {
+  const result = core.investmentReturnSeries(
+    [100, 200, 220],
+    [{ purchases: 100 }, { purchases: 100 }, {}],
+  );
+  assert.deepEqual(result, [0, 0, 10]);
+});
+
+test('investment return series includes sale proceeds without treating a sale as a loss', () => {
+  const result = core.investmentReturnSeries(
+    [100, 120, 60],
+    [{ purchases: 100 }, {}, { sales: 60 }],
+  );
+  assert.deepEqual(result, [0, 20, 20]);
+});
+
+test('investment return series can measure a selected period from opening value', () => {
+  const result = core.investmentReturnSeries(
+    [120, 220, 242],
+    [{}, { purchases: 100 }, {}],
+    120,
+  );
+  assert.deepEqual(result, [0, 0, 10]);
+});
+
 test('normalizeDatabase preserves unknown fields and fills missing collections', () => {
   const normalized = core.normalizeDatabase({ finance_records: [{ amount: 10 }], stock_transactions: [{ txn_id: 't1' }], custom_note: 'keep me' }, 1);
   assert.equal(normalized.schema_version, 1);

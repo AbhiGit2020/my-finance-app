@@ -77,6 +77,20 @@
     });
   }
 
+  function investmentReturnSeries(values, flows, openingCapital = 0) {
+    let purchases = 0;
+    let sales = 0;
+    return (values || []).map((value, index) => {
+      const flow = flows?.[index] || {};
+      purchases += number(flow.purchases);
+      sales += number(flow.sales);
+      const invested = number(openingCapital) + purchases;
+      if (invested <= 0) return null;
+      const gain = number(value) + sales - number(openingCapital) - purchases;
+      return gain / invested * 100;
+    });
+  }
+
   function computeHoldings(transactions, rateResolver) {
     const positions = {};
     const realized = {};
@@ -256,7 +270,7 @@
 
   return {
     DEFAULT_FX_TO_SGD, DATA_COLLECTION_KEYS, number, latestDatedRow,
-    fxRateToSgd, convertToSgd, performanceSeries, chainReturnSeries,
+    fxRateToSgd, convertToSgd, performanceSeries, chainReturnSeries, investmentReturnSeries,
     computeHoldings, computeConsolidatedHoldings, normalizeDatabase, mergeDatabases,
   };
 });
