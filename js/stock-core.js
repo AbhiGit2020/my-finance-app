@@ -56,12 +56,6 @@
     return number(amount) * fxRateToSgd(currency, date, rates, defaults);
   }
 
-  function fxRateBetween(fromCurrency, toCurrency, date, rates, defaults = DEFAULT_FX_TO_SGD) {
-    const fromRate = fxRateToSgd(fromCurrency, date, rates, defaults);
-    const toRate = fxRateToSgd(toCurrency, date, rates, defaults);
-    return toRate > 0 ? fromRate / toRate : 1;
-  }
-
   function performanceSeries(values) {
     const baseline = (values || []).find(value => Number.isFinite(number(value)) && number(value) > 0);
     if (!baseline) return (values || []).map(() => null);
@@ -202,7 +196,7 @@
 
   return {
     DEFAULT_FX_TO_SGD, DATA_COLLECTION_KEYS, number, latestDatedRow,
-    fxRateToSgd, convertToSgd, fxRateBetween, performanceSeries, chainReturnSeries,
+    fxRateToSgd, convertToSgd, performanceSeries, chainReturnSeries,
     computeHoldings, normalizeDatabase, mergeDatabases,
   };
 });

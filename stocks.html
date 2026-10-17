@@ -285,7 +285,7 @@ async function retirePortfolioAccount(){
 
 // ── Holdings computation ──────────────────────────────────
 function computeHoldings(txns){
-  return StockCore.computeHoldings(txns, (currency, date) => appFxToUsd(currency, date));
+  return StockCore.computeHoldings(txns, () => 1);
 }
 
 // ── Finnhub API ───────────────────────────────────────────
@@ -414,7 +414,7 @@ function render(){
   const rows=holdings.map(h=>{
     const latest=latestStockPrice(profile(),h.ticker);
     const close=parseFloat(latest?.close)||0;
-    const closeUsd=close*appFxToUsd(h.currency, latest?.asof_date);
+    const closeUsd=close;
     const wkSnap=stockPriceAsOf(profile(),h.ticker,wkDate);
     const moSnap=stockPriceAsOf(profile(),h.ticker,moDate);
     const ytdSnap=stockPriceAsOf(profile(),h.ticker,ytdDate);
@@ -739,9 +739,6 @@ function buildPortfolioChart() {
     ticker,
     storedPrices.filter(row=>String(row.ticker||'').trim().toUpperCase()===ticker).sort((a,b)=>a.asof_date.localeCompare(b.asof_date)),
   ]));
-  const tickerCurrency={};
-  sortedTxns.forEach(row=>{tickerCurrency[String(row.ticker||'').trim().toUpperCase()]=row.currency||'USD';});
-
   function holdingsAtDate(dateStr) {
     const { holdings: datedHoldings } = computeHoldings(sortedTxns.filter(t => t.date <= dateStr));
     return Object.fromEntries(datedHoldings.map(holding => [holding.ticker, holding]));
@@ -761,7 +758,7 @@ function buildPortfolioChart() {
     tickers.forEach(ticker => {
       const snap=priceFromSeries(priceSeries[ticker],dateStr);
       if(!snap){byStock[ticker]=0;byStockPrice[ticker]=0;return;}
-      const price=(parseFloat(snap.close)||0)*appFxToUsd(tickerCurrency[ticker],snap.asof_date);
+      const price=parseFloat(snap.close)||0;
       byStockPrice[ticker]=price;
       const qty = pos[ticker]?.qty || 0;
       if (qty <= 0) { byStock[ticker] = 0; return; }
@@ -777,7 +774,7 @@ function buildPortfolioChart() {
       if(holding.qty<=0||!priceSeries[ticker])return total;
       const snap=priceFromSeries(priceSeries[ticker],dateStr);
       if(!snap)return total;
-      const price=(parseFloat(snap.close)||0)*appFxToUsd(holding.currency,snap.asof_date);
+      const price=parseFloat(snap.close)||0;
       return total+holding.qty*price;
     },0);
   }

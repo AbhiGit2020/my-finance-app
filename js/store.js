@@ -301,10 +301,6 @@ function appFxToSgd(currency, date) {
   return StockCore.fxRateToSgd(currency, date, loadFxRates(), STOCK_FX_TO_SGD);
 }
 
-function appFxToUsd(currency, date) {
-  return StockCore.fxRateBetween(currency, 'USD', date, loadFxRates(), STOCK_FX_TO_SGD);
-}
-
 function latestStockPrice(profile, ticker) {
   return loadStockPrices()
     .filter(row => row.profile === profile && row.ticker === ticker)
