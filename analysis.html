@@ -15,15 +15,31 @@
 .analysis-chart { position:relative; height:310px; }
 .analysis-empty { display:grid; place-items:center; height:100%; color:var(--text-muted); font-size:0.86rem; }
 .analysis-table-section { margin-top:4px; }
-.exposure-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
-.exposure-panel { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:16px; min-width:0; }
-.exposure-title { color:var(--text-muted); font-size:0.78rem; font-weight:600; text-transform:uppercase; margin-bottom:12px; }
-.exposure-list { display:grid; gap:9px; max-height:280px; overflow:auto; padding-right:3px; }
+.summary-strip { display:grid; grid-template-columns:1.25fr repeat(5,1fr); margin-bottom:20px; background:var(--bg2); border:1px solid var(--border2); border-radius:8px; overflow:hidden; }
+.summary-metric { min-width:0; padding:16px 18px; border-left:1px solid var(--border); }
+.summary-metric:first-child { border-left:0; background:var(--teal-dim); }
+.summary-metric-label { color:var(--text-muted); font-size:0.72rem; font-weight:600; text-transform:uppercase; margin-bottom:5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.summary-metric-value { font:700 1.3rem 'IBM Plex Mono',monospace; white-space:nowrap; }
+.summary-metric:first-child .summary-metric-value { font-size:1.55rem; color:var(--teal); }
+.summary-metric-value.pos { color:var(--green); }
+.summary-metric-value.neg { color:var(--red); }
+.summary-metric-value.neutral { color:var(--text); }
+.exposure-grid { display:grid; grid-template-columns:minmax(280px,0.85fr) minmax(420px,1.3fr) minmax(320px,1fr); gap:16px; margin-bottom:20px; align-items:stretch; }
+.exposure-panel { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:18px; min-width:0; }
+.exposure-title { color:var(--text-muted); font-size:0.76rem; font-weight:600; text-transform:uppercase; margin-bottom:16px; }
+.exposure-list { display:grid; gap:10px; }
 .exposure-label { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:0.8rem; margin-bottom:4px; }
 .exposure-label span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .exposure-value { color:var(--text); font-family:'IBM Plex Mono',monospace; font-weight:600; }
-.exposure-track { height:5px; border-radius:3px; background:var(--bg3); overflow:hidden; }
-.exposure-fill { height:100%; border-radius:3px; background:var(--teal); }
+.exposure-track { height:6px; border-radius:3px; background:var(--bg3); overflow:hidden; }
+.exposure-fill { height:100%; border-radius:3px; background:var(--teal); transition:width 0.25s ease; }
+.exposure-donut-layout { display:grid; grid-template-columns:minmax(130px,0.85fr) minmax(120px,1fr); align-items:center; gap:16px; min-height:240px; height:calc(100% - 32px); }
+.exposure-donut { position:relative; width:100%; aspect-ratio:1; max-width:190px; margin:auto; }
+.exposure-legend { display:grid; gap:9px; align-content:center; }
+.exposure-legend-row { display:grid; grid-template-columns:10px minmax(0,1fr) auto; align-items:center; gap:8px; font-size:0.78rem; }
+.exposure-swatch { width:9px; height:9px; border-radius:2px; }
+.exposure-legend-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted); }
+.exposure-legend-value { font-family:'IBM Plex Mono',monospace; font-weight:600; color:var(--text); }
 .classification-table input, .classification-table select { width:100%; min-width:140px; }
 .performance-panel { margin-bottom:20px; }
 .performance-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:12px; }
@@ -60,8 +76,9 @@
 th:first-child .sort-header { justify-content:flex-start; }
 .sort-header:hover, .sort-header:focus-visible { color:var(--text); }
 .sort-indicator { width:10px; color:var(--teal); }
-@media (max-width:1100px) { .analysis-grid { grid-template-columns:1fr; } .exposure-grid { grid-template-columns:1fr 1fr; } }
-@media (max-width:768px) { .analysis-panel { padding:14px 12px; } .analysis-chart { height:270px; } .performance-header { flex-direction:column; } .comparison-chart { height:300px; } .analysis-help-button { left:16px; bottom:16px; } .analysis-help { left:16px; bottom:68px; } .exposure-grid { grid-template-columns:1fr; } }
+@media (max-width:1280px) { .summary-strip { grid-template-columns:repeat(3,1fr); } .summary-metric:nth-child(4) { border-left:0; } .summary-metric:nth-child(n+4) { border-top:1px solid var(--border); } .exposure-grid { grid-template-columns:1fr 1fr; } .exposure-panel:nth-child(2) { grid-row:span 2; } }
+@media (max-width:1100px) { .analysis-grid { grid-template-columns:1fr; } }
+@media (max-width:768px) { .analysis-panel { padding:14px 12px; } .analysis-chart { height:270px; } .performance-header { flex-direction:column; } .comparison-chart { height:300px; } .analysis-help-button { left:16px; bottom:16px; } .analysis-help { left:16px; bottom:68px; } .summary-strip { grid-template-columns:1fr 1fr; } .summary-metric:nth-child(even) { border-left:1px solid var(--border); } .summary-metric:nth-child(odd) { border-left:0; } .summary-metric:nth-child(n+3) { border-top:1px solid var(--border); } .exposure-grid { grid-template-columns:1fr; } .exposure-panel:nth-child(2) { grid-row:auto; } }
 </style>
 </head>
 <body>
@@ -97,12 +114,12 @@ th:first-child .sort-header { justify-content:flex-start; }
     </div>
   </div>
 
-  <div class="kpi-grid" id="analysisKpis"></div>
+  <div class="summary-strip" id="analysisKpis"></div>
 
   <section class="exposure-grid" aria-label="Portfolio exposure summary">
-    <div class="exposure-panel"><div class="exposure-title">Stocks vs ETFs</div><div class="exposure-list" id="assetExposure"></div></div>
+    <div class="exposure-panel"><div class="exposure-title">Stocks vs ETFs</div><div class="exposure-donut-layout"><div class="exposure-donut"><canvas id="assetExposureChart"></canvas></div><div class="exposure-legend" id="assetExposure"></div></div></div>
     <div class="exposure-panel"><div class="exposure-title">Industry Exposure</div><div class="exposure-list" id="industryExposure"></div></div>
-    <div class="exposure-panel"><div class="exposure-title">Country Exposure</div><div class="exposure-list" id="countryExposure"></div></div>
+    <div class="exposure-panel"><div class="exposure-title">Country Exposure</div><div class="exposure-donut-layout"><div class="exposure-donut"><canvas id="countryExposureChart"></canvas></div><div class="exposure-legend" id="countryExposure"></div></div></div>
   </section>
 
   <details>
@@ -221,6 +238,8 @@ let analysisRows=[];
 let allocationChart=null;
 let comparisonChart=null;
 let performanceChart=null;
+let assetExposureChart=null;
+let countryExposureChart=null;
 let performancePeriod='ytd';
 let selectedTickers=new Set();
 let selectionProfile='';
@@ -298,14 +317,35 @@ function exposureGroups(rows,field){
   return [...groups].map(([label,value])=>({label,value,pct:total>0?value/total*100:0})).sort((a,b)=>b.value-a.value);
 }
 
-function renderExposureList(id,groups){
-  document.getElementById(id).innerHTML=groups.map((row,index)=>`<div><div class="exposure-label"><span>${escapeHtml(row.label)}</span><span class="exposure-value">${fmt(row.pct,1)}%</span></div><div class="exposure-track"><div class="exposure-fill" style="width:${Math.max(0,Math.min(100,row.pct))}%;background:${COLORS[index%COLORS.length]}"></div></div></div>`).join('')||'<div class="text-muted">No holdings</div>';
+function compactExposureGroups(groups,limit){
+  if(groups.length<=limit)return groups;
+  const visible=groups.slice(0,limit-1);
+  const remainder=groups.slice(limit-1).reduce((result,row)=>({label:'Other',value:result.value+row.value,pct:result.pct+row.pct}),{value:0,pct:0});
+  return [...visible,remainder];
+}
+
+function renderExposureBars(id,groups){
+  document.getElementById(id).innerHTML=compactExposureGroups(groups,10).map((row,index)=>`<div><div class="exposure-label"><span>${escapeHtml(row.label)}</span><span class="exposure-value">${fmt(row.pct,1)}%</span></div><div class="exposure-track"><div class="exposure-fill" style="width:${Math.max(0,Math.min(100,row.pct))}%;background:${COLORS[index%COLORS.length]}"></div></div></div>`).join('')||'<div class="text-muted">No holdings</div>';
+}
+
+function renderExposureDonut(canvasId,legendId,groups,chartName){
+  const visible=compactExposureGroups(groups,7);
+  const legend=document.getElementById(legendId);
+  legend.innerHTML=visible.map((row,index)=>`<div class="exposure-legend-row"><span class="exposure-swatch" style="background:${COLORS[index%COLORS.length]}"></span><span class="exposure-legend-name">${escapeHtml(row.label)}</span><span class="exposure-legend-value">${fmt(row.pct,1)}%</span></div>`).join('')||'<div class="text-muted">No holdings</div>';
+  if(chartName==='asset'&&assetExposureChart)assetExposureChart.destroy();
+  if(chartName==='country'&&countryExposureChart)countryExposureChart.destroy();
+  const chart=new Chart(document.getElementById(canvasId),{
+    type:'doughnut',
+    data:{labels:visible.map(row=>row.label),datasets:[{data:visible.map(row=>row.value),backgroundColor:visible.map((row,index)=>COLORS[index%COLORS.length]),borderColor:'#161b22',borderWidth:3,hoverOffset:4}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'67%',plugins:{legend:{display:false},tooltip:{callbacks:{label:context=>`${context.label}: ${money(context.raw)} (${fmt(visible[context.dataIndex]?.pct,1)}%)`}}}}
+  });
+  if(chartName==='asset')assetExposureChart=chart;else countryExposureChart=chart;
 }
 
 function renderExposureSummary(rows){
-  renderExposureList('assetExposure',exposureGroups(rows,'assetType'));
-  renderExposureList('industryExposure',exposureGroups(rows,'industry'));
-  renderExposureList('countryExposure',exposureGroups(rows,'country'));
+  renderExposureDonut('assetExposureChart','assetExposure',exposureGroups(rows,'assetType'),'asset');
+  renderExposureBars('industryExposure',exposureGroups(rows,'industry'));
+  renderExposureDonut('countryExposureChart','countryExposure',exposureGroups(rows,'country'),'country');
 }
 
 function renderClassificationEditor(rows){
@@ -464,7 +504,7 @@ function renderKpis(rows){
     ['Unrealized P&L',money(unrealized),signedClass(unrealized)],['Return on Investment',pct(roi),signedClass(roi)],
     ['Open Positions',String(rows.length),'neutral'],['Top 5 Concentration',`${fmt(topFive,1)}%`,topFive>70?'neg':'neutral'],
   ];
-  document.getElementById('analysisKpis').innerHTML=items.map(([label,value,cls])=>`<div class="kpi ${cls==='pos'?'green':cls==='neg'?'red':'teal'}"><div class="kpi-label">${label}</div><div class="kpi-value ${cls}">${value}</div></div>`).join('');
+  document.getElementById('analysisKpis').innerHTML=items.map(([label,value,cls])=>`<div class="summary-metric"><div class="summary-metric-label">${label}</div><div class="summary-metric-value ${cls}">${value}</div></div>`).join('');
 }
 
 function chartOptions(){return {responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#c9d1d9',boxWidth:12,padding:12}},tooltip:{callbacks:{label:context=>`${context.label}: ${money(context.raw)} (${fmt(context.dataset.data.reduce((s,v)=>s+v,0)?context.raw/context.dataset.data.reduce((s,v)=>s+v,0)*100:0,1)}%)`}}}};}
