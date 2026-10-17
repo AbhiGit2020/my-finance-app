@@ -54,7 +54,7 @@ th:first-child .sort-header { justify-content:flex-start; }
 </nav>
 
 <div class="page">
-  <div class="page-title">My Portfolios</div>
+  <div class="page-title" id="portfolioPageTitle">My Portfolio</div>
 
   <!-- Profile selector -->
   <div class="flex flex-gap flex-center mb-16 flex-wrap">
@@ -227,6 +227,12 @@ function fmtUsd(n,dec=0){ return `US$ ${fmt(n,dec)}`; }
 function pct(a,b){ if(!b) return 0; return (a-b)/b*100; }
 
 function profile(){ return getActiveProfile(); }
+
+function updatePortfolioTitle(){
+  const name=profile();
+  document.getElementById('portfolioPageTitle').textContent=name;
+  document.title=`${name} - Stock Analysis`;
+}
 
 function isConsolidated(){ return profile()===CONSOLIDATED_PROFILE; }
 
@@ -1027,6 +1033,7 @@ function renderStockPerformance(data) {
 
 // ── Profile change handler ────────────────────────────────
 window.onProfileChange = function() {
+  updatePortfolioTitle();
   // Clear all holdings display immediately
   const ids = ['stockKPIs','holdingsTable','realizedTable','txTable','stockPerformance'];
   ids.forEach(id => { const el=document.getElementById(id); if(el) el.innerHTML=''; });
@@ -1039,7 +1046,7 @@ window.onProfileChange = function() {
   if(cl) { cl.style.display='block'; cl.textContent='Click "📈 Fetch Prices" first, then the chart will appear here.'; }
 };
 
-window.onDataLoaded = function() { renderPortfolioAccounts(); render(); buildPortfolioChart(); };
+window.onDataLoaded = function() { updatePortfolioTitle(); renderPortfolioAccounts(); render(); buildPortfolioChart(); };
 </script>
 </body>
 </html>
