@@ -117,7 +117,7 @@ th:first-child .sort-header { justify-content:flex-start; }
   <div class="summary-strip" id="analysisKpis"></div>
 
   <section class="exposure-grid" aria-label="Portfolio exposure summary">
-    <div class="exposure-panel"><div class="exposure-title">Stocks vs ETFs</div><div class="exposure-donut-layout"><div class="exposure-donut"><canvas id="assetExposureChart"></canvas></div><div class="exposure-legend" id="assetExposure"></div></div></div>
+    <div class="exposure-panel"><div class="exposure-title">Stocks / ETFs / Gold / Crypto</div><div class="exposure-donut-layout"><div class="exposure-donut"><canvas id="assetExposureChart"></canvas></div><div class="exposure-legend" id="assetExposure"></div></div></div>
     <div class="exposure-panel"><div class="exposure-title">Industry Exposure</div><div class="exposure-list" id="industryExposure"></div></div>
     <div class="exposure-panel"><div class="exposure-title">Country Exposure</div><div class="exposure-donut-layout"><div class="exposure-donut"><canvas id="countryExposureChart"></canvas></div><div class="exposure-legend" id="countryExposure"></div></div></div>
   </section>
@@ -196,8 +196,8 @@ const DEFAULT_CLASSIFICATIONS={
   'ENGI':['Stock','Utilities','France'],
   'FLIN':['ETF','Diversified ETF','India'],
   'GOOG':['Stock','Communication Services','United States'],
-  'IAUM':['ETF','Gold','Global'],
-  'IBIT':['ETF','Bitcoin','Global'],
+  'IAUM':['Gold','Gold','Global'],
+  'IBIT':['Crypto','Bitcoin','Global'],
   'IBKR':['Stock','Financials','United States'],
   'KO':['Stock','Consumer Staples','United States'],
   'LLY':['Stock','Healthcare','United States'],
@@ -311,7 +311,8 @@ function exposureGroups(rows,field){
   const total=rows.reduce((sum,row)=>sum+row.marketValue,0);
   const groups=new Map();
   rows.forEach(row=>{
-    const label=classificationFor(row.ticker)[field]||'Unclassified';
+    const value=classificationFor(row.ticker)[field]||'Unclassified';
+    const label=field==='assetType'?({Stock:'Stocks',ETF:'ETFs',Gold:'Gold',Crypto:'Crypto'}[value]||value):value;
     groups.set(label,(groups.get(label)||0)+row.marketValue);
   });
   return [...groups].map(([label,value])=>({label,value,pct:total>0?value/total*100:0})).sort((a,b)=>b.value-a.value);
@@ -351,7 +352,7 @@ function renderExposureSummary(rows){
 function renderClassificationEditor(rows){
   const body=[...rows].sort((a,b)=>a.ticker.localeCompare(b.ticker)).map(row=>{
     const classification=classificationFor(row.ticker);
-    return `<tr data-classification-ticker="${escapeAttr(row.ticker)}"><td class="bold">${escapeHtml(row.ticker)}</td><td><select class="classification-type"><option ${classification.assetType==='Stock'?'selected':''}>Stock</option><option ${classification.assetType==='ETF'?'selected':''}>ETF</option><option ${classification.assetType==='Other'?'selected':''}>Other</option><option ${classification.assetType==='Unclassified'?'selected':''}>Unclassified</option></select></td><td><input class="classification-industry" value="${escapeAttr(classification.industry)}"></td><td><input class="classification-country" value="${escapeAttr(classification.country)}"></td></tr>`;
+    return `<tr data-classification-ticker="${escapeAttr(row.ticker)}"><td class="bold">${escapeHtml(row.ticker)}</td><td><select class="classification-type"><option ${classification.assetType==='Stock'?'selected':''}>Stock</option><option ${classification.assetType==='ETF'?'selected':''}>ETF</option><option ${classification.assetType==='Gold'?'selected':''}>Gold</option><option ${classification.assetType==='Crypto'?'selected':''}>Crypto</option><option ${classification.assetType==='Other'?'selected':''}>Other</option><option ${classification.assetType==='Unclassified'?'selected':''}>Unclassified</option></select></td><td><input class="classification-industry" value="${escapeAttr(classification.industry)}"></td><td><input class="classification-country" value="${escapeAttr(classification.country)}"></td></tr>`;
   }).join('');
   document.getElementById('classificationTable').innerHTML=`<thead><tr><th>Ticker</th><th>Type</th><th>Industry</th><th>Country / Exposure</th></tr></thead><tbody>${body}</tbody>`;
 }
