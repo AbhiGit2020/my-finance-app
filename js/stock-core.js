@@ -91,9 +91,9 @@
     });
   }
 
-  function classifyOpportunity(drawdown, trend20, relativeReturn) {
+  function classifyOpportunity(drawdown, shortTermReturn, relativeReturn) {
     const dd = Number.isFinite(drawdown) ? drawdown : null;
-    const trend = Number.isFinite(trend20) ? trend20 : null;
+    const trend = Number.isFinite(shortTermReturn) ? shortTermReturn : null;
     const relative = Number.isFinite(relativeReturn) ? relativeReturn : null;
     if (dd !== null && dd <= -20 && trend !== null && trend < -3) return { label: 'Falling / wait', key: 'falling' };
     if (dd !== null && dd <= -10 && trend !== null && trend >= 0) return { label: 'Stabilising', key: 'stabilising' };

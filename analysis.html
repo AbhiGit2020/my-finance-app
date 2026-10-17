@@ -243,12 +243,15 @@ function performanceData(){
     const yearPrices=series.filter(row=>row.asof_date>=yearStart&&row.asof_date<=latestDate).map(row=>Number(row.close)).filter(value=>value>0);
     const high52=yearPrices.length?Math.max(...yearPrices):0;
     const drawdown=high52&&current?change(Number(current.close),high52):null;
-    const recent=series.filter(row=>row.asof_date<=latestDate).slice(-20).map(row=>Number(row.close)).filter(value=>value>0);
-    const average20=recent.length?recent.reduce((sum,value)=>sum+value,0)/recent.length:0;
-    const trend20=average20&&current?change(Number(current.close),average20):null;
+    const datedSeries=series.filter(row=>row.asof_date<=latestDate);
+    const threeMonthStart=rangeStart('3m',latestDate);
+    const threeMonthBase=priceFromSeries(datedSeries,threeMonthStart)||datedSeries.find(row=>row.asof_date>=threeMonthStart);
+    const twentyDayBase=datedSeries.length>20?datedSeries[datedSeries.length-21]:datedSeries[0];
+    const threeMonthReturn=threeMonthBase&&current?change(Number(current.close),Number(threeMonthBase.close)):null;
+    const twentyDayReturn=twentyDayBase&&current?change(Number(current.close),Number(twentyDayBase.close)):null;
     const relative=periodReturn!=null&&portfolioReturn!=null?periodReturn-portfolioReturn:null;
-    const setup=StockCore.classifyOpportunity(drawdown,trend20,relative);
-    return {ticker,periodReturn,portfolioReturn,relative,drawdown,trend20,setup:setup.label,setupClass:setup.key};
+    const setup=StockCore.classifyOpportunity(drawdown,twentyDayReturn,relative);
+    return {ticker,periodReturn,portfolioReturn,relative,drawdown,threeMonthReturn,twentyDayReturn,setup:setup.label,setupClass:setup.key};
   });
   const compact=['1w','1m','3m','6m'].includes(performancePeriod);
   const labels=dates.map(date=>new Date(`${date}T00:00:00Z`).toLocaleDateString('en-SG',compact?{day:'numeric',month:'short'}:{month:'short',year:'2-digit'}));
@@ -356,10 +359,11 @@ function renderPerformance(){
     <td class="${signedClass(row.portfolioReturn)}">${pct(row.portfolioReturn)}</td>
     <td class="${signedClass(row.relative)}">${pct(row.relative)}</td>
     <td class="${signedClass(row.drawdown)}">${pct(row.drawdown)}</td>
-    <td class="${signedClass(row.trend20)}">${pct(row.trend20)}</td>
+    <td class="${signedClass(row.threeMonthReturn)}">${pct(row.threeMonthReturn)}</td>
+    <td class="${signedClass(row.twentyDayReturn)}">${pct(row.twentyDayReturn)}</td>
     <td><span class="setup-label setup-${row.setupClass}">${row.setup}</span></td>
   </tr>`).join('');
-  document.getElementById('performanceTable').innerHTML=`<thead><tr><th style="width:42px">Show</th><th>Stock</th><th>Period Return</th><th>Portfolio</th><th>Vs Portfolio</th><th>From 52W High</th><th>Vs 20D Avg</th><th>Setup</th></tr></thead><tbody>${body||'<tr><td colspan="8" class="text-muted" style="text-align:center;padding:20px">No price history is available.</td></tr>'}</tbody>`;
+  document.getElementById('performanceTable').innerHTML=`<thead><tr><th style="width:42px">Show</th><th>Stock</th><th>Period Return</th><th>Portfolio</th><th>Vs Portfolio</th><th>From 52W High</th><th>Last 3 Months</th><th>Last 20 Days</th><th>Setup</th></tr></thead><tbody>${body||'<tr><td colspan="9" class="text-muted" style="text-align:center;padding:20px">No price history is available.</td></tr>'}</tbody>`;
 }
 
 function setSort(key){sortState=sortState.key===key?{key,direction:sortState.direction==='asc'?'desc':'asc'}:{key,direction:key==='ticker'?'asc':'desc'};renderTable();}
@@ -379,7 +383,7 @@ function renderTable(){
 }
 
 function exportAnalysis(){
-  const performance=(latestPerformanceData?.summaries||[]).map(row=>({Ticker:row.ticker,Period:performancePeriod.toUpperCase(),'Period Return %':row.periodReturn,'Portfolio Return %':row.portfolioReturn,'Vs Portfolio %':row.relative,'From 52W High %':row.drawdown,'Vs 20D Average %':row.trend20,Setup:row.setup}));
+  const performance=(latestPerformanceData?.summaries||[]).map(row=>({Ticker:row.ticker,Period:performancePeriod.toUpperCase(),'Period Return %':row.periodReturn,'Portfolio Return %':row.portfolioReturn,'Vs Portfolio %':row.relative,'From 52W High %':row.drawdown,'Last 3 Months %':row.threeMonthReturn,'Last 20 Days %':row.twentyDayReturn,Setup:row.setup}));
   exportToExcel([{name:'holding_analysis',data:analysisRows.map(row=>({Ticker:row.ticker,'Market Value USD':row.marketValue,'Weight %':row.weight,'Cost Basis USD':row.costBasis,'Unrealized P&L USD':row.unrealized,'Return on Cost %':row.returnPct,'1W %':row.weekPct,'1M %':row.monthPct,'YTD %':row.ytdPct,'As Of':row.asOf}))},{name:'performance',data:performance},{name:'account_summary',data:accountRows()}]);
 }
 
