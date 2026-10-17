@@ -130,9 +130,9 @@ th:first-child .sort-header { justify-content:flex-start; }
     <button class="analysis-help-close" type="button" aria-label="Close definitions" onclick="toggleAnalysisHelp(false)">×</button>
   </div>
   <dl class="analysis-help-list">
-    <div class="analysis-help-item"><dt class="text-red">Falling / wait</dt><dd>At least 20% below its 52-week high and down more than 3% over the last 20 market days. The decline is still continuing.</dd></div>
-    <div class="analysis-help-item"><dt style="color:var(--yellow)">Pullback</dt><dd>At least 10% below its 52-week high, but the last 20 days do not yet show clear stabilisation.</dd></div>
-    <div class="analysis-help-item"><dt class="text-green">Stabilising</dt><dd>At least 10% below its 52-week high and flat or positive over the last 20 market days. Selling pressure may be easing.</dd></div>
+    <div class="analysis-help-item"><dt class="text-red">Falling / wait</dt><dd>At least 20% below its 52-week high and down more than 3% over the last month. The decline is still continuing.</dd></div>
+    <div class="analysis-help-item"><dt style="color:var(--yellow)">Pullback</dt><dd>At least 10% below its 52-week high, but the last month does not yet show clear stabilisation.</dd></div>
+    <div class="analysis-help-item"><dt class="text-green">Stabilising</dt><dd>At least 10% below its 52-week high and flat or positive over the last month. Selling pressure may be easing.</dd></div>
     <div class="analysis-help-item"><dt style="color:#58a6ff">Extended</dt><dd>Within 5% of its 52-week high and outperforming the portfolio by more than 5 percentage points for the selected period.</dd></div>
     <div class="analysis-help-item"><dt>Neutral</dt><dd>None of the conditions above apply. The price is neither a clear pullback nor unusually extended under these rules.</dd></div>
   </dl>
@@ -223,7 +223,7 @@ function rangeStart(period,endDate){
   if(period==='all')return '';
   const end=new Date(`${endDate}T00:00:00Z`);
   if(period==='ytd')return `${end.getUTCFullYear()}-01-01`;
-  const days={"1w":7,"1m":30,"3m":90,"6m":180,"1y":365}[period]||0;
+  const days={"1w":7,"1m":30,"3m":90,"6m":180,"9m":270,"1y":365}[period]||0;
   end.setUTCDate(end.getUTCDate()-days);
   return end.toISOString().slice(0,10);
 }
@@ -280,18 +280,25 @@ function performanceData(){
     const baseline=start?(priceFromSeries(series,start)||series.find(row=>row.asof_date>=start)):series[0];
     const periodReturn=baseline&&current?change(Number(current.close),Number(baseline.close)):null;
     const yearStart=rangeStart('1y',latestDate);
-    const yearPrices=series.filter(row=>row.asof_date>=yearStart&&row.asof_date<=latestDate).map(row=>Number(row.close)).filter(value=>value>0);
-    const high52=yearPrices.length?Math.max(...yearPrices):0;
+    const yearRows=series.filter(row=>row.asof_date>=yearStart&&row.asof_date<=latestDate&&Number(row.close)>0);
+    const highRow=yearRows.reduce((best,row)=>!best||Number(row.close)>=Number(best.close)?row:best,null);
+    const high52=Number(highRow?.close)||0;
     const drawdown=high52&&current?change(Number(current.close),high52):null;
+    const weeksSinceHigh=highRow?Math.floor((new Date(`${latestDate}T00:00:00Z`)-new Date(`${highRow.asof_date}T00:00:00Z`))/(7*86400000)):null;
     const datedSeries=series.filter(row=>row.asof_date<=latestDate);
-    const threeMonthStart=rangeStart('3m',latestDate);
-    const threeMonthBase=priceFromSeries(datedSeries,threeMonthStart)||datedSeries.find(row=>row.asof_date>=threeMonthStart);
-    const twentyDayBase=datedSeries.length>20?datedSeries[datedSeries.length-21]:datedSeries[0];
-    const threeMonthReturn=threeMonthBase&&current?change(Number(current.close),Number(threeMonthBase.close)):null;
-    const twentyDayReturn=twentyDayBase&&current?change(Number(current.close),Number(twentyDayBase.close)):null;
+    const trailingReturn=period=>{
+      const startDate=rangeStart(period,latestDate);
+      const base=priceFromSeries(datedSeries,startDate)||datedSeries.find(row=>row.asof_date>=startDate);
+      return base&&current?change(Number(current.close),Number(base.close)):null;
+    };
+    const return1w=trailingReturn('1w');
+    const return1m=trailingReturn('1m');
+    const return3m=trailingReturn('3m');
+    const return6m=trailingReturn('6m');
+    const return9m=trailingReturn('9m');
     const relative=periodReturn!=null&&portfolioReturn!=null?periodReturn-portfolioReturn:null;
-    const setup=StockCore.classifyOpportunity(drawdown,twentyDayReturn,relative);
-    return {ticker,periodReturn,portfolioReturn,relative,drawdown,threeMonthReturn,twentyDayReturn,setup:setup.label,setupClass:setup.key};
+    const setup=StockCore.classifyOpportunity(drawdown,return1m,relative);
+    return {ticker,periodReturn,portfolioReturn,relative,drawdown,weeksSinceHigh,return1w,return1m,return3m,return6m,return9m,setup:setup.label,setupClass:setup.key};
   });
   const compact=['1w','1m','3m','6m'].includes(performancePeriod);
   const labels=dates.map(date=>new Date(`${date}T00:00:00Z`).toLocaleDateString('en-SG',compact?{day:'numeric',month:'short'}:{month:'short',year:'2-digit'}));
@@ -399,11 +406,15 @@ function renderPerformance(){
     <td class="${signedClass(row.portfolioReturn)}">${pct(row.portfolioReturn)}</td>
     <td class="${signedClass(row.relative)}">${pct(row.relative)}</td>
     <td class="${signedClass(row.drawdown)}">${pct(row.drawdown)}</td>
-    <td class="${signedClass(row.threeMonthReturn)}">${pct(row.threeMonthReturn)}</td>
-    <td class="${signedClass(row.twentyDayReturn)}">${pct(row.twentyDayReturn)}</td>
+    <td>${row.weeksSinceHigh==null?'—':row.weeksSinceHigh}</td>
+    <td class="${signedClass(row.return1w)}">${pct(row.return1w)}</td>
+    <td class="${signedClass(row.return1m)}">${pct(row.return1m)}</td>
+    <td class="${signedClass(row.return3m)}">${pct(row.return3m)}</td>
+    <td class="${signedClass(row.return6m)}">${pct(row.return6m)}</td>
+    <td class="${signedClass(row.return9m)}">${pct(row.return9m)}</td>
     <td><span class="setup-label setup-${row.setupClass}">${row.setup}</span></td>
   </tr>`).join('');
-  document.getElementById('performanceTable').innerHTML=`<thead><tr><th style="width:42px">Show</th><th>Stock</th><th>Period Return</th><th>Portfolio</th><th>Vs Portfolio</th><th>From 52W High</th><th>Last 3 Months</th><th>Last 20 Days</th><th>Setup</th></tr></thead><tbody>${body||'<tr><td colspan="9" class="text-muted" style="text-align:center;padding:20px">No price history is available.</td></tr>'}</tbody>`;
+  document.getElementById('performanceTable').innerHTML=`<thead><tr><th style="width:42px">Show</th><th>Stock</th><th>Period Return</th><th>Portfolio</th><th>Vs Portfolio</th><th>From 52W High</th><th>Weeks Since 52W High</th><th>1W</th><th>1M</th><th>3M</th><th>6M</th><th>9M</th><th>Setup</th></tr></thead><tbody>${body||'<tr><td colspan="13" class="text-muted" style="text-align:center;padding:20px">No price history is available.</td></tr>'}</tbody>`;
 }
 
 function setSort(key){sortState=sortState.key===key?{key,direction:sortState.direction==='asc'?'desc':'asc'}:{key,direction:key==='ticker'?'asc':'desc'};renderTable();}
@@ -423,7 +434,7 @@ function renderTable(){
 }
 
 function exportAnalysis(){
-  const performance=(latestPerformanceData?.summaries||[]).map(row=>({Ticker:row.ticker,Period:performancePeriod.toUpperCase(),'Period Return %':row.periodReturn,'Portfolio Return %':row.portfolioReturn,'Vs Portfolio %':row.relative,'From 52W High %':row.drawdown,'Last 3 Months %':row.threeMonthReturn,'Last 20 Days %':row.twentyDayReturn,Setup:row.setup}));
+  const performance=(latestPerformanceData?.summaries||[]).map(row=>({Ticker:row.ticker,Period:performancePeriod.toUpperCase(),'Period Return %':row.periodReturn,'Portfolio Return %':row.portfolioReturn,'Vs Portfolio %':row.relative,'From 52W High %':row.drawdown,'Weeks Since 52W High':row.weeksSinceHigh,'1W %':row.return1w,'1M %':row.return1m,'3M %':row.return3m,'6M %':row.return6m,'9M %':row.return9m,Setup:row.setup}));
   exportToExcel([{name:'holding_analysis',data:analysisRows.map(row=>({Ticker:row.ticker,'Market Value USD':row.marketValue,'Weight %':row.weight,'Cost Basis USD':row.costBasis,'Unrealized P&L USD':row.unrealized,'Return on Cost %':row.returnPct,'1W %':row.weekPct,'1M %':row.monthPct,'YTD %':row.ytdPct,'As Of':row.asOf}))},{name:'performance',data:performance},{name:'account_summary',data:accountRows()}]);
 }
 
