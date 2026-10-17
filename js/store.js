@@ -5,6 +5,7 @@ const DATA_COLLECTION_KEYS = StockCore.DATA_COLLECTION_KEYS;
 const STOCK_FX_TO_SGD = StockCore.DEFAULT_FX_TO_SGD;
 const SS_FINNHUB = 'hf_finnhub_key';
 const PROFILE_KEY = 'hf_active_profile';
+const CONSOLIDATED_PROFILE = 'My Portfolio';
 
 let _db = emptyDb();
 let _dataReady = false;
@@ -36,14 +37,20 @@ function normalizeDb(data) {
       if (row.profile && !String(row.profile).startsWith('__')) accountNames.add(row.profile);
     });
   });
-  if (!accountNames.size) accountNames.add('My Portfolio');
+  accountNames.add(CONSOLIDATED_PROFILE);
   const existingByName = new Map((normalized.portfolio_accounts || []).map(account => [account.name, account]));
-  normalized.portfolio_accounts = [...accountNames].map(name => existingByName.get(name) || {
-    account_id: `account-${slugId(name)}`,
-    name,
-    active: true,
-    created_at: new Date().toISOString(),
-  });
+  normalized.portfolio_accounts = [...accountNames]
+    .sort((left, right) => left === CONSOLIDATED_PROFILE ? -1 : right === CONSOLIDATED_PROFILE ? 1 : left.localeCompare(right))
+    .map(name => {
+      const existing = existingByName.get(name);
+      if (existing) return name === CONSOLIDATED_PROFILE ? { ...existing, active: true } : existing;
+      return {
+        account_id: `account-${slugId(name)}`,
+        name,
+        active: true,
+        created_at: new Date().toISOString(),
+      };
+    });
   return normalized;
 }
 
@@ -54,7 +61,7 @@ function slugId(value) {
 function getActiveProfile() {
   const accounts = loadPortfolioAccounts().filter(account => account.active !== false);
   const saved = localStorage.getItem(PROFILE_KEY);
-  return accounts.some(account => account.name === saved) ? saved : (accounts[0]?.name || 'My Portfolio');
+  return accounts.some(account => account.name === saved) ? saved : CONSOLIDATED_PROFILE;
 }
 
 function setActiveProfile(name) {
@@ -69,7 +76,7 @@ function initProfileSelector() {
   const accounts = loadPortfolioAccounts().filter(account => account.active !== false);
   document.querySelectorAll('.global-profile-sel').forEach(select => {
     select.innerHTML = accounts.map(account =>
-      `<option value="${escapeAttr(account.name)}" ${account.name === active ? 'selected' : ''}>${escapeHtml(account.name)}</option>`
+      `<option value="${escapeAttr(account.name)}" ${account.name === active ? 'selected' : ''}>${escapeHtml(account.name === CONSOLIDATED_PROFILE ? 'My Portfolio (All Accounts)' : account.name)}</option>`
     ).join('');
     select.value = active;
     select.onchange = () => setActiveProfile(select.value);

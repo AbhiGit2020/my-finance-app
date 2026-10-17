@@ -146,6 +146,54 @@
     return { holdings, realRows };
   }
 
+  function computeConsolidatedHoldings(transactions, profiles, rateResolver) {
+    const allowed = new Set((profiles || []).map(profile => String(profile)));
+    const grouped = new Map();
+    (transactions || []).forEach(row => {
+      const profile = String(row.profile || '');
+      if (!allowed.has(profile)) return;
+      if (!grouped.has(profile)) grouped.set(profile, []);
+      grouped.get(profile).push(row);
+    });
+
+    const holdingsByTicker = new Map();
+    const realizedByTicker = new Map();
+    grouped.forEach(rows => {
+      const account = computeHoldings(rows, rateResolver);
+      account.holdings.forEach(holding => {
+        const current = holdingsByTicker.get(holding.ticker) || {
+          ticker: holding.ticker, qty: 0, cost_basis: 0, realized_pnl: 0,
+          currencies: new Set(),
+        };
+        current.qty += holding.qty;
+        current.cost_basis += holding.cost_basis;
+        current.realized_pnl += holding.realized_pnl || 0;
+        current.currencies.add(holding.currency);
+        holdingsByTicker.set(holding.ticker, current);
+      });
+      account.realRows.forEach(row => {
+        const current = realizedByTicker.get(row.ticker) || { realized_pnl: 0 };
+        current.realized_pnl += row.realized_pnl || 0;
+        realizedByTicker.set(row.ticker, current);
+      });
+    });
+
+    const holdings = [...holdingsByTicker.values()].map(holding => ({
+      ticker: holding.ticker,
+      qty: holding.qty,
+      currency: holding.currencies.size === 1 ? [...holding.currencies][0] : 'MIXED',
+      avg_cost: holding.qty > 0 ? holding.cost_basis / holding.qty : 0,
+      cost_basis: holding.cost_basis,
+      realized_pnl: holding.realized_pnl,
+    }));
+    const realRows = [...realizedByTicker.entries()].map(([ticker, row]) => ({
+      ticker,
+      realized_pnl: row.realized_pnl,
+      open_qty: holdingsByTicker.get(ticker)?.qty || 0,
+    }));
+    return { holdings, realRows };
+  }
+
   function normalizeDatabase(data, schemaVersion = 1) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Backup must be a JSON object');
     const incomingVersion = Number.parseInt(data.schema_version || 0, 10);
@@ -209,6 +257,6 @@
   return {
     DEFAULT_FX_TO_SGD, DATA_COLLECTION_KEYS, number, latestDatedRow,
     fxRateToSgd, convertToSgd, performanceSeries, chainReturnSeries,
-    computeHoldings, normalizeDatabase, mergeDatabases,
+    computeHoldings, computeConsolidatedHoldings, normalizeDatabase, mergeDatabases,
   };
 });

@@ -94,6 +94,11 @@ th:first-child .sort-header { justify-content:flex-start; }
   <!-- Portfolio Summary KPIs -->
   <div class="kpi-grid" id="stockKPIs"></div>
 
+  <section id="accountOverview" style="display:none">
+    <div class="section-header"><div class="section-title">Account Overview</div></div>
+    <div class="tbl-wrap"><table id="accountOverviewTable"></table></div>
+  </section>
+
   <!-- Add transaction -->
   <details>
     <summary>➕ Add Buy / Sell Transaction</summary>
@@ -223,9 +228,48 @@ function pct(a,b){ if(!b) return 0; return (a-b)/b*100; }
 
 function profile(){ return getActiveProfile(); }
 
+function isConsolidated(){ return profile()===CONSOLIDATED_PROFILE; }
+
+function accountProfiles(){
+  return loadPortfolioAccounts()
+    .filter(account=>account.active!==false&&account.name!==CONSOLIDATED_PROFILE)
+    .map(account=>account.name);
+}
+
+function transactionsForView(){
+  const selected=profile();
+  const allowed=new Set(isConsolidated()?accountProfiles():[selected]);
+  return loadStockTransactions().filter(row=>allowed.has(row.profile));
+}
+
+function pricesForView(){
+  const allowed=new Set(isConsolidated()?accountProfiles():[profile()]);
+  const selected=loadStockPrices().filter(row=>allowed.has(row.profile));
+  if(!isConsolidated())return selected;
+  const deduplicated=new Map();
+  selected.forEach(row=>{
+    const key=`${row.ticker}|${row.asof_date}`;
+    const current=deduplicated.get(key);
+    if(!current||String(row.fetched_at||'')>String(current.fetched_at||''))deduplicated.set(key,row);
+  });
+  return [...deduplicated.values()];
+}
+
+function latestPriceForView(ticker){
+  return pricesForView()
+    .filter(row=>row.ticker===ticker)
+    .reduce((best,row)=>(!best||String(row.asof_date||'')>String(best.asof_date||''))?row:best,null);
+}
+
+function priceAsOfForView(ticker,date){
+  return pricesForView()
+    .filter(row=>row.ticker===ticker&&String(row.asof_date||'')<=date)
+    .reduce((best,row)=>(!best||String(row.asof_date||'')>String(best.asof_date||''))?row:best,null);
+}
+
 function renderPortfolioAccounts(){
   const accounts=loadPortfolioAccounts().filter(account=>account.active!==false);
-  document.getElementById('portfolioAccountList').textContent=accounts.map(account=>account.name).join(' | ');
+  document.getElementById('portfolioAccountList').textContent=accounts.map(account=>account.name===CONSOLIDATED_PROFILE?'My Portfolio (All Accounts)':account.name).join(' | ');
 }
 
 function addPortfolioAccount(){
@@ -248,6 +292,7 @@ function replacePortfolioName(rows,oldName,newName){
 
 function renamePortfolioAccount(){
   const oldName=profile();
+  if(isConsolidated()){toast('My Portfolio is the automatic all-accounts view','error');return;}
   const input=document.getElementById('renamePortfolioName');
   const newName=input.value.trim();
   if(!newName||newName===oldName){toast('Enter a different account name','error');return;}
@@ -270,6 +315,7 @@ function renamePortfolioAccount(){
 }
 
 async function retirePortfolioAccount(){
+  if(isConsolidated()){toast('My Portfolio cannot be retired','error');return;}
   const active=loadPortfolioAccounts().filter(account=>account.active!==false);
   if(active.length<=1){toast('Keep at least one portfolio account','error');return;}
   const name=profile();
@@ -288,6 +334,12 @@ function computeHoldings(txns){
   return StockCore.computeHoldings(txns, () => 1);
 }
 
+function computeViewHoldings(txns=transactionsForView()){
+  return isConsolidated()
+    ? StockCore.computeConsolidatedHoldings(txns,accountProfiles(),()=>1)
+    : computeHoldings(txns);
+}
+
 // ── Finnhub API ───────────────────────────────────────────
 // stock_prices holds a dated snapshot per (profile,ticker,asof_date) rather
 // than a single overwritten row, so weekly/monthly/YTD reference prices are
@@ -299,9 +351,9 @@ function wkRefDate()  { return todayMinusDays(7); }
 function moRefDate()  { return todayMinusDays(30); }
 function ytdRefDate() { return `${new Date().getFullYear()}-01-01`; }
 
-function upsertStockSnapshot(prices, ticker, date, close, source) {
-  const kept = prices.filter(p => !(p.profile === profile() && p.ticker === ticker && p.asof_date === date));
-  kept.push({ profile: profile(), ticker, asof_date: date, close, source, fetched_at: new Date().toISOString() });
+function upsertStockSnapshot(prices, ticker, date, close, source, targetProfile=profile()) {
+  const kept = prices.filter(p => !(p.profile === targetProfile && p.ticker === ticker && p.asof_date === date));
+  kept.push({ profile: targetProfile, ticker, asof_date: date, close, source, fetched_at: new Date().toISOString() });
   return kept;
 }
 
@@ -317,8 +369,8 @@ async function mapWithConcurrency(items, concurrency, worker) {
 }
 
 async function fetchPrices() {
-  const txns = loadStockTransactions().filter(r => r.profile === profile());
-  const { holdings } = computeHoldings(txns);
+  const txns = transactionsForView();
+  const { holdings } = computeViewHoldings(txns);
   if (!holdings.length) { toast('No holdings to fetch prices for', 'error'); return; }
 
   const btn = document.getElementById('fetchBtn');
@@ -333,16 +385,19 @@ async function fetchPrices() {
 
   await mapWithConcurrency(tickers,4,async ticker=>{
     try {
-      const existing = prices.filter(p=>p.profile===profile()&&p.ticker===ticker).sort((a,b)=>a.asof_date.localeCompare(b.asof_date));
+      const targetProfiles=isConsolidated()
+        ? [...new Set(txns.filter(row=>row.ticker===ticker).map(row=>row.profile))]
+        : [profile()];
+      const existing = prices.filter(p=>targetProfiles.includes(p.profile)&&p.ticker===ticker).sort((a,b)=>a.asof_date.localeCompare(b.asof_date));
       const historyFrom = existing.length>5 ? todayMinusDays(14) : firstTxnDate;
       const history = await fetchLocalHistory(ticker,historyFrom,today);
       history.candles.forEach(candle=>{
-        prices=upsertStockSnapshot(prices,ticker,candle.date,candle.close,history.source);
+        targetProfiles.forEach(target=>{prices=upsertStockSnapshot(prices,ticker,candle.date,candle.close,history.source,target);});
       });
       try {
         if(!hasFinnhubKey)throw new Error('Finnhub key not configured');
         const quote=await fetchLocalQuote(ticker);
-        if(quote.c) prices=upsertStockSnapshot(prices,ticker,today,quote.c,'finnhub');
+        if(quote.c)targetProfiles.forEach(target=>{prices=upsertStockSnapshot(prices,ticker,today,quote.c,'finnhub',target);});
       } catch(error) {
         console.info(`Current quote unavailable for ${ticker}; using latest daily close.`,error);
       }
@@ -405,19 +460,19 @@ function sortHoldingRows(rows){
 }
 
 function render(){
-  const txns=loadStockTransactions().filter(r=>r.profile===profile());
-  const {holdings,realRows}=computeHoldings(txns);
+  const txns=transactionsForView();
+  const {holdings,realRows}=computeViewHoldings(txns);
   const wkDate=wkRefDate(), moDate=moRefDate(), ytdDate=ytdRefDate();
 
   // merge — wk/mo/ytd reference prices are the closest real snapshot on or
   // before each date, not a single fake duplicated value.
   const rows=holdings.map(h=>{
-    const latest=latestStockPrice(profile(),h.ticker);
+    const latest=latestPriceForView(h.ticker);
     const close=parseFloat(latest?.close)||0;
     const closeUsd=close;
-    const wkSnap=stockPriceAsOf(profile(),h.ticker,wkDate);
-    const moSnap=stockPriceAsOf(profile(),h.ticker,moDate);
-    const ytdSnap=stockPriceAsOf(profile(),h.ticker,ytdDate);
+    const wkSnap=priceAsOfForView(h.ticker,wkDate);
+    const moSnap=priceAsOfForView(h.ticker,moDate);
+    const ytdSnap=priceAsOfForView(h.ticker,ytdDate);
     const wkRef=wkSnap?parseFloat(wkSnap.close)||null:null;
     const moRef=moSnap?parseFloat(moSnap.close)||null:null;
     const ytdRef=ytdSnap?parseFloat(ytdSnap.close)||null:null;
@@ -443,7 +498,7 @@ function render(){
   // KPIs
   const kpiGrid=document.getElementById('stockKPIs');
   const kpis=[
-    {label:'Portfolio Value',val:fmtUsd(totalMV),cls:'neutral'},
+    {label:isConsolidated()?'Combined Portfolio Value':'Portfolio Value',val:fmtUsd(totalMV),cls:'neutral'},
     signedKpi('Weekly %',weekly),
     signedKpi('Monthly %',monthly),
     signedKpi('YTD %',ytd),
@@ -451,6 +506,8 @@ function render(){
     {label:'Unrealized P&L',val:fmtUsd(totalUnrealized),cls:totalUnrealized>=0?'pos':'neg'},
   ];
   kpiGrid.innerHTML=kpis.map(k=>`<div class="kpi ${k.cls==='neutral'?'teal':k.cls==='pos'?'green':'red'}"><div class="kpi-label">${k.label}</div><div class="kpi-value ${k.cls}">${k.val}</div></div>`).join('');
+
+  renderAccountOverview();
 
   // Holdings table
   const sortedRows=sortHoldingRows(rows);
@@ -492,18 +549,46 @@ function render(){
   renderEditTxSelect();
 }
 
+function renderAccountOverview(){
+  const section=document.getElementById('accountOverview');
+  if(!isConsolidated()){section.style.display='none';return;}
+  const accounts=accountProfiles().map(name=>{
+    const txns=loadStockTransactions().filter(row=>row.profile===name);
+    const {holdings}=computeHoldings(txns);
+    const costBasis=holdings.reduce((sum,holding)=>sum+holding.cost_basis,0);
+    const marketValue=holdings.reduce((sum,holding)=>sum+holding.qty*(parseFloat(latestPriceForView(holding.ticker)?.close)||0),0);
+    return {name,holdings:holdings.length,costBasis,marketValue,unrealized:marketValue-costBasis};
+  });
+  const totals=accounts.reduce((result,row)=>({
+    holdings:result.holdings+row.holdings,
+    costBasis:result.costBasis+row.costBasis,
+    marketValue:result.marketValue+row.marketValue,
+    unrealized:result.unrealized+row.unrealized,
+  }),{holdings:0,costBasis:0,marketValue:0,unrealized:0});
+  const rowHtml=accounts.map(row=>`<tr>
+    <td class="bold">${escapeHtml(row.name)}</td><td>${fmtN(row.holdings)}</td>
+    <td>${fmt(row.costBasis)}</td><td class="bold">${fmt(row.marketValue)}</td>
+    <td class="${row.unrealized>=0?'pos':'neg'}">${fmt(row.unrealized)}</td>
+  </tr>`).join('');
+  document.getElementById('accountOverviewTable').innerHTML=`
+    <thead><tr><th>Account</th><th>Positions</th><th>Cost Basis USD</th><th>Market Value USD</th><th>Unrealized P&amp;L</th></tr></thead>
+    <tbody>${rowHtml}<tr class="bold"><td>Total</td><td>${fmtN(totals.holdings)}</td><td>${fmt(totals.costBasis)}</td><td>${fmt(totals.marketValue)}</td><td class="${totals.unrealized>=0?'pos':'neg'}">${fmt(totals.unrealized)}</td></tr></tbody>`;
+  section.style.display='block';
+}
+
 // ── Transactions ──────────────────────────────────────────
 function renderTransactions(){
   const search=document.getElementById('txSearch').value.toUpperCase().trim();
-  let txns=loadStockTransactions().filter(r=>r.profile===profile());
+  let txns=transactionsForView();
   if(search) txns=txns.filter(t=>t.ticker.includes(search));
   txns.sort((a,b)=>new Date(b.date)-new Date(a.date));
 
-  const cols=['Date','Ticker','Action','Qty','Price','Commission','Currency','Notes'];
+  const cols=isConsolidated()?['Account','Date','Ticker','Action','Qty','Price','Commission','Currency','Notes']:['Date','Ticker','Action','Qty','Price','Commission','Currency','Notes'];
   let html=`<thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
-  if(!txns.length) html+='<tr><td colspan="8" class="text-muted" style="text-align:center;padding:16px">No transactions</td></tr>';
+  if(!txns.length) html+=`<tr><td colspan="${cols.length}" class="text-muted" style="text-align:center;padding:16px">No transactions</td></tr>`;
   txns.forEach(t=>{
     html+=`<tr>
+      ${isConsolidated()?`<td class="bold">${escapeHtml(t.profile)}</td>`:''}
       <td>${escapeHtml(t.date||'')}</td>
       <td class="bold">${escapeHtml(t.ticker)}</td>
       <td><span class="chip chip-${t.action==='BUY'?'buy':'sell'}">${t.action}</span></td>
@@ -523,6 +608,7 @@ function currentQty(ticker,txns){
 }
 
 function addTransaction(){
+  if(isConsolidated()){toast('Select an individual account before adding a transaction','error');return;}
   const ticker=document.getElementById('txTicker').value.toUpperCase().trim();
   const action=document.getElementById('txAction').value;
   const qty=parseFloat(document.getElementById('txQty').value)||0;
@@ -555,6 +641,7 @@ function addTransaction(){
 // Each field writes a dated snapshot (today / 1wk ago / 1mo ago / Jan 1) into
 // the same history stock_prices uses, so manual entries feed the real Wk/Mo/YTD calc.
 function renderManualPriceForm(tickers){
+  if(isConsolidated()){document.getElementById('manualPriceForm').innerHTML='<p class="text-muted">Select an individual account to enter a manual price.</p>';return;}
   if(!tickers.length){document.getElementById('manualPriceForm').innerHTML='<p class="text-muted">Add holdings first.</p>';return;}
   let html='';
   const wkDate=wkRefDate(), moDate=moRefDate(), ytdDate=ytdRefDate();
@@ -579,6 +666,7 @@ function renderManualPriceForm(tickers){
 }
 
 function saveManualPrice(ticker){
+  if(isConsolidated()){toast('Select an individual account before entering a price','error');return;}
   const dateStr=document.getElementById(`mp_date_${ticker}`).value || new Date().toISOString().slice(0,10);
   const close=parseFloat(document.getElementById(`mp_close_${ticker}`).value)||0;
   const wk=parseFloat(document.getElementById(`mp_wk_${ticker}`).value)||0;
@@ -596,6 +684,9 @@ function saveManualPrice(ticker){
 
 // ── Edit / Delete transaction ─────────────────────────────
 function renderEditTxSelect(){
+  const panel=document.getElementById('editTxPanel');
+  panel.style.display=isConsolidated()?'none':'';
+  if(isConsolidated())return;
   const txns=loadStockTransactions().filter(r=>r.profile===profile()).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const sel=document.getElementById('editTxSel');
   sel.innerHTML=txns.map(t=>`<option value="${escapeAttr(t.txn_id)}">${escapeHtml(t.date)} | ${escapeHtml(t.ticker)} | ${escapeHtml(t.action)} | Qty ${escapeHtml(t.qty)}</option>`).join('');
@@ -655,8 +746,8 @@ async function deleteTx(id){
 // ── Export ────────────────────────────────────────────────
 function exportStocksExcel(){
   exportToExcel([
-    {name:'Transactions',data:loadStockTransactions().filter(r=>r.profile===profile())},
-    {name:'Prices',data:loadStockPrices().filter(p=>p.profile===profile())},
+    {name:'Transactions',data:transactionsForView()},
+    {name:'Prices',data:pricesForView()},
   ]);
 }
 
@@ -718,13 +809,13 @@ function buildPortfolioChart() {
   if (chartWrap) chartWrap.style.display = 'none';
   if (perf) perf.style.display = 'none';
 
-  const txns = loadStockTransactions().filter(r => r.profile === profile());
+  const txns = transactionsForView();
   if (!txns.length) {
     if (chartLoading) { chartLoading.style.display = 'block'; chartLoading.textContent = 'No transactions for this profile yet.'; }
     return;
   }
 
-  const storedPrices = loadStockPrices().filter(p => p.profile === profile());
+  const storedPrices = pricesForView();
   if (!storedPrices.length) {
     if (chartLoading) { chartLoading.style.display = 'block'; chartLoading.textContent = 'Click "📈 Fetch Prices" to load current prices, then the chart will appear.'; }
     return;
@@ -740,7 +831,7 @@ function buildPortfolioChart() {
     storedPrices.filter(row=>String(row.ticker||'').trim().toUpperCase()===ticker).sort((a,b)=>a.asof_date.localeCompare(b.asof_date)),
   ]));
   function holdingsAtDate(dateStr) {
-    const { holdings: datedHoldings } = computeHoldings(sortedTxns.filter(t => t.date <= dateStr));
+    const { holdings: datedHoldings } = computeViewHoldings(sortedTxns.filter(t => t.date <= dateStr));
     return Object.fromEntries(datedHoldings.map(holding => [holding.ticker, holding]));
   }
 

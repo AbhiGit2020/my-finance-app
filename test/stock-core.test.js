@@ -47,6 +47,21 @@ test('computeHoldings applies an audited cost basis adjustment without changing 
   assert.equal(result.holdings[0].avg_cost, 9);
 });
 
+test('computeConsolidatedHoldings preserves account-level FIFO before combining accounts', () => {
+  const transactions = [
+    { profile: 'Abhi', ticker: 'ABC', action: 'BUY', qty: 2, price: 10, currency: 'USD', date: '2025-01-01' },
+    { profile: 'Abhi', ticker: 'ABC', action: 'SELL', qty: 1, price: 30, currency: 'USD', date: '2025-03-01' },
+    { profile: 'Kiara', ticker: 'ABC', action: 'BUY', qty: 3, price: 20, currency: 'USD', date: '2025-02-01' },
+    { profile: 'Retired', ticker: 'ABC', action: 'BUY', qty: 5, price: 1, currency: 'USD', date: '2025-01-01' },
+  ];
+  const result = core.computeConsolidatedHoldings(transactions, ['Abhi', 'Kiara']);
+  assert.equal(result.holdings[0].qty, 4);
+  assert.equal(result.holdings[0].cost_basis, 70);
+  assert.equal(result.holdings[0].avg_cost, 17.5);
+  assert.equal(result.holdings[0].realized_pnl, 20);
+  assert.equal(result.realRows[0].open_qty, 4);
+});
+
 test('dated FX uses the latest rate on or before the transaction date', () => {
   const rates = [
     { currency: 'USD', asof_date: '2025-01-01', rate_to_sgd: 1.31 },

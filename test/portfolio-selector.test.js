@@ -39,4 +39,6 @@ test('new portfolio accounts appear immediately in the global selector', () => {
 
   assert.equal(selector.value, 'Family');
   assert.match(selector.innerHTML, />Family</);
+  assert.match(selector.innerHTML, />My Portfolio \(All Accounts\)</);
+  assert.equal(vm.runInContext('loadPortfolioAccounts()[0].name', context), 'My Portfolio');
 });
